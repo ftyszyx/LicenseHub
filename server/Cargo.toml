@@ -2,6 +2,7 @@
 name = "app_server"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.92.0"
 
 [lib]
 name = "app_server"
@@ -12,12 +13,18 @@ name = "app_server"
 path = "src/main.rs"
 
 [dependencies]
-# axum = "0.8.4"
 # 异步
 tokio = { version = "1.46.0", features = ["full"] }
 # web框架
 # https://salvo.rs/zh-hans/guide/quick-start.html
-salvo = { version = "0.84", features = ["logging","oapi","anyhow","cors","affix-state","test"] }
+salvo = { version = "0.84", features = [
+    "logging",
+    "oapi",
+    "anyhow",
+    "cors",
+    "affix-state",
+    "test",
+] }
 salvo-oapi = { version = "0.84", features = ["swagger-ui"] }
 #utoipa = { version = "5.0.0", features = ["chrono"] } 
 # 序列化
@@ -31,15 +38,13 @@ tracing-appender = "0.2"
 # 环境变量
 dotenvy = "0.15.7"
 # 数据库
-sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres" ] }
-sea-orm = { version = "1.1.13", features = [ "sqlx-postgres", "runtime-tokio-native-tls", "macros","debug-print"] }
-migration = { path = "migration" }
-
-#本地依赖
-entity = { path = "entity" }
-pay = { path = "pay" }
-xt-oss = { path = "xt-oss" }
-aliyun-sts={path="aliyun-sts"}
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres"] }
+sea-orm = { version = "1.1.13", features = [
+    "sqlx-postgres",
+    "runtime-tokio-native-tls",
+    "macros",
+    "debug-print",
+] }
 
 #其它
 bcrypt = "0.17.0"
@@ -47,23 +52,24 @@ jsonwebtoken = "9.3"
 chrono = "0.4"
 serde_json = "1.0.140"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
-validator= {version="0.20.0",features = ["derive"]}
+validator = { version = "0.20.0", features = ["derive"] }
 futures = "0.3.31"
-redis={version="0.32.4",features = ["tokio-comp", "json","aio"] }
+redis = { version = "0.32.4", features = ["tokio-comp", "json", "aio"] }
 http-body-util = "0.1"
-casbin = { version = "2.10.1", default-features = false, features = ["runtime-async-std", "logging", "incremental"] }
-async-trait={version="0.1.88"}
+async-trait = { version = "0.1.88" }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 percent-encoding = "2.3"
 base64 = "0.22"
 hmac-sha1 = "0.2"
 
+# 本地依赖
+data_model = { path = "crates/data_model" }
+
 [dev-dependencies]
 tower = { version = "0.5.2", features = ["util"] }
 tower-service = "0.3"
 hyper = { version = "1.0", features = ["full"] }
-# axum = { version = "0.8.4" }
 mime = "0.3"
 
 [workspace]
-members = ["migration", "entity", "pay","xt-oss","aliyun-sts"]
+members = ["crates/data_model"]

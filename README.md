@@ -110,6 +110,7 @@ python build_web.py --base-url {your server_url}
 
 ```
 rsync -avz web/ /opt/1panel/www/sites/index/ 
+
 ```
 
 ## 效果展示
@@ -182,6 +183,39 @@ rsync -avz web/ /opt/1panel/www/sites/index/
 后台可以查询到注册码已经使用
 
 ![](https://ftyszyx.github.io/feishu-vitepress/assets/VoQQbdDswockkzxa8F7cWpShnEt.png)
+
+
+
+## 开发相关
+
+
+### 数据库迁移
+
+```
+cargo install sqlx-cli
+```
+
+```bash
+sqlx migrate run --database-url postgres://test:123456@localhost:5432/hub
+```
+
+清除
+```
+sqlx migrate revert --database-url postgres://test:123456@localhost:5432/hub
+sqlx migrate revert --target-version 0 --database-url postgres://test:123456@localhost:5432/hub
+
+```
+
+
+### 生成entity
+```
+cargo install sea-orm-cli
+```
+```
+sea-orm-cli generate entity -u "postgres://test:123456@localhost:5432/hub" -o "crates/data_model/src" --with-serde both
+```
+
+
 
 ## 问题反馈
 

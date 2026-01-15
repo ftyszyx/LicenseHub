@@ -1,15 +1,21 @@
-use jsonwebtoken::{encode, Header, EncodingKey};
+use crate::apis::auth_middleware::Claims;
+use crate::core::config::JwtConfig;
+use crate::core::my_error::AppError;
 use chrono::{Duration, Utc};
-use crate::types::{common::Claims, error::AppError, config::JwtConfig};
+use jsonwebtoken::{EncodingKey, Header, encode};
 
-pub fn create_jwt(user_id: i32, role: String, jwt_config: &JwtConfig) -> Result<String, AppError> {
+pub fn create_jwt(
+    user_id: i32,
+    role_ids: Vec<i32>,
+    jwt_config: &JwtConfig,
+) -> Result<String, AppError> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::days(jwt_config.expire_days as i64))
         .expect("valid timestamp")
         .timestamp();
     let claims = Claims {
-        sub: user_id,
-        role,
+        user_id,
+        role_ids,
         exp: expiration as usize,
     };
     encode(
