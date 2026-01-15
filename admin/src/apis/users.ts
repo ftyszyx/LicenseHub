@@ -1,18 +1,18 @@
 
 
 import request from '@/utils/request'
-import type {  PagingResponse } from '@/types'
-import type { ListUsersParams, UserInfo, CreateUserReq, UpdateUserReq } from '@/types/user'
+import type { PagingResponse } from '@/types'
+import type { ListUsersParams, UserWithRoles, CreateUserReq, UpdateUserReq } from '@/types/user'
 
-export async function fetchUsers(params: ListUsersParams): Promise<PagingResponse<UserInfo>> {
+export async function fetchUsers(params: ListUsersParams): Promise<PagingResponse<UserWithRoles>> {
   return (await request.get('/admin/users/list', { params })).data
 }
 
-export async function createUser(payload: CreateUserReq): Promise<UserInfo> {
+export async function createUser(payload: CreateUserReq): Promise<UserWithRoles> {
   return (await request.post('/admin/users', payload)).data
 }
 
-export async function updateUser(id: number, payload: UpdateUserReq): Promise<UserInfo> {
+export async function updateUser(id: number, payload: UpdateUserReq): Promise<UserWithRoles> {
   return (await request.put(`/admin/users/${id}`, payload)).data
 }
 

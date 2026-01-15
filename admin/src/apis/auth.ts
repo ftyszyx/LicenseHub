@@ -13,13 +13,9 @@ export const sentRegister = async (payload: RegisterPayload) => {
     return response.data
 }
 
-export const sentLogout = async () => {
-    const response = await request.post('/logout') as ApiResponse<AuthResponse>
-    return response.data
-}
 
 export const sentGetUserInfo = async () => {
-    const response = await request.get('/user/info') as ApiResponse<AuthResponse>
+    const response = await request.get('/admin/me') as ApiResponse<any>
     return response.data
 }
 

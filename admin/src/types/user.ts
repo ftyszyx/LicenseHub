@@ -5,17 +5,18 @@ export interface ChangePasswordPayload {
   new_password: string
 }
 
-export interface UserInfo {
+export interface UserModel {
   id: number
   username: string
-  balance: number
-  invite_count: number
-  invite_rebate_total: number
-  role_id: number
-  role_name: string
   created_at: string
+  updated_at: string
 }
 
-export type CreateUserReq = { username: string; password: string; role_id?: number }
-export type UpdateUserReq = { username?: string; password?: string; role_id?: number; balance?: number }
-export type ListUsersParams = {  username?: string; id?: number }&ListParamsReq
+export interface UserWithRoles {
+  user: UserModel
+  role_ids: number[]
+}
+
+export type CreateUserReq = { username: string; password: string; role_ids?: number[] }
+export type UpdateUserReq = { username?: string; password?: string; role_ids?: number[] }
+export type ListUsersParams = { username?: string; id?: number } & ListParamsReq

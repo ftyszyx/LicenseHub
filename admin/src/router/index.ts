@@ -1,17 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '@/layouts/AdminLayout.vue'
 import DashboardView from '@/views/admin/DashboardView.vue'
-import ProductAdminView from '@/views/admin/ProductAdminView.vue'
-import OrderAdminView from '@/views/admin/OrderAdminView.vue'
 import UserAdminView from '@/views/admin/UserAdminView.vue'
 import AppAdminView from '@/views/admin/AppAdminView.vue'
-import ResourceAdminView from '@/views/admin/ResourceAdminView.vue'
 import RegCodesAdminView from '@/views/admin/RegCodesAdminView.vue'
 import RoleAdminView from '@/views/admin/RoleAdminView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import RegisterView from '@/views/auth/RegisterView.vue'
 import DevicesAdminView from '@/views/admin/DevicesAdminView.vue'
-import PermissionAdminView from '@/views/admin/PermissionAdminView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { RouteName, RoutePath } from '@/types'
 
@@ -56,16 +52,6 @@ const router = createRouter({
                     component: DashboardView
                 },
                 {
-                    path: RoutePath.AdminProducts,
-                    name: RouteName.AdminProducts,
-                    component: ProductAdminView
-                },
-                {
-                    path: RoutePath.AdminOrders,
-                    name: RouteName.AdminOrders,
-                    component: OrderAdminView
-                },
-                {
                     path: RoutePath.AdminUsers,
                     name: RouteName.AdminUsers,
                     component: UserAdminView
@@ -81,24 +67,14 @@ const router = createRouter({
                     component: AppAdminView
                 },
                 {
-                    path: RoutePath.AdminResources,
-                    name: RouteName.AdminResources,
-                    component: ResourceAdminView
-                }
-                ,{
                     path: RoutePath.AdminDevices,
                     name: RouteName.AdminDevices,
                     component: DevicesAdminView
-                }
-                ,{
+                },
+                {
                     path: '/admin/reg_codes',
                     name: 'admin_reg_codes',
                     component: RegCodesAdminView
-                }
-                ,{
-                    path: RoutePath.AdminPermissions,
-                    name: RouteName.AdminPermissions,
-                    component: PermissionAdminView
                 }
             ]
         }

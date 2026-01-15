@@ -19,20 +19,12 @@ const menuItems: AdminMenuItem[] = [
   { label: 'menu.users', icon: 'User', path: RoutePath.AdminUsers },
   //i18n-key: menu.roles
   { label: 'menu.roles', icon: 'UserFilled', path: RoutePath.AdminRoles },
-  //i18n-key: menu.permissions
-  { label: 'menu.permissions', icon: 'Lock', path: RoutePath.AdminPermissions },
   //i18n-key: menu.apps
   { label: 'menu.apps', icon: 'Cpu', path: RoutePath.AdminApps },
   //i18n-key: menu.devices
   { label: 'menu.devices', icon: 'Iphone', path: RoutePath.AdminDevices },
   //i18n-key: menu.reg_codes
   { label: 'menu.reg_codes', icon: 'Tickets', path: RoutePath.AdminRegCodes },
-  //i18n-key: menu.products
-  { label: 'menu.products', icon: 'Goods', path: RoutePath.AdminProducts },
-  //i18n-key: menu.orders
-  { label: 'menu.orders', icon: 'Tickets', path: RoutePath.AdminOrders },
-  //i18n-key: menu.resources
-  { label: 'menu.resources', icon: 'Picture', path: RoutePath.AdminResources },
 ]
 </script>
 

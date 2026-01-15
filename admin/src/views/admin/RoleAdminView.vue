@@ -22,16 +22,16 @@ function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reloa
 
 const dialog = reactive({ visible: false, mode: 'create' as 'create' | 'edit', editingId: undefined as number | undefined })
 const formRef = ref<FormInstance>()
-const form = reactive<{ name: string; remark?: string | null }>({ name: '', remark: '' })
+const form = reactive<{ name: string; description?: string | null }>({ name: '', description: '' })
 const rules = reactive<FormRules>({ name: [{ required: true, message: 'Name required' }] })
 
-function openCreate() { dialog.mode = 'create'; dialog.editingId = undefined; form.name = ''; form.remark = ''; dialog.visible = true }
-function openEdit(row: RoleInfo) { dialog.mode = 'edit'; dialog.editingId = row.id; form.name = row.name; form.remark = row.remark || ''; dialog.visible = true }
+function openCreate() { dialog.mode = 'create'; dialog.editingId = undefined; form.name = ''; form.description = ''; dialog.visible = true }
+function openEdit(row: RoleInfo) { dialog.mode = 'edit'; dialog.editingId = row.id; form.name = row.name; form.description = row.description || ''; dialog.visible = true }
 
 async function submit() {
   const valid = await formRef.value?.validate(); if (!valid) { ElMessage.error(t('common.please_check_form') as string); return }
-  if (dialog.mode === 'create') { await createRole({ name: form.name, remark: form.remark || undefined }); ElMessage.success(t('common.created') as string) }
-  else if (dialog.editingId != null) { await updateRole(dialog.editingId, { name: form.name, remark: form.remark || undefined }); ElMessage.success(t('common.save') as string) }
+  if (dialog.mode === 'create') { await createRole({ name: form.name, description: form.description || undefined }); ElMessage.success(t('common.created') as string) }
+  else if (dialog.editingId != null) { await updateRole(dialog.editingId, { name: form.name, description: form.description || undefined }); ElMessage.success(t('common.save') as string) }
   dialog.visible = false; await reload()
 }
 
@@ -63,7 +63,7 @@ onMounted(reload)
           </template>
         </el-table-column>
         <el-table-column :label="$t('common.remark')" min-width="200">
-          <template #default="{ row }">{{ row.remark }}</template>
+          <template #default="{ row }">{{ row.description }}</template>
         </el-table-column>
         <el-table-column :label="$t('common.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
@@ -85,7 +85,7 @@ onMounted(reload)
     <el-dialog v-model="dialog.visible" :title="dialog.mode === 'create' ? $t('common.create') : $t('common.edit')" width="520px">
       <el-form label-width="140px" ref="formRef" :model="form" :rules="rules">
         <el-form-item :label="$t('common.name')" prop="name"><el-input v-model="form.name" /></el-form-item>
-        <el-form-item :label="$t('common.remark')" prop="remark"><el-input v-model="form.remark" /></el-form-item>
+        <el-form-item :label="$t('common.remark')" prop="description"><el-input v-model="form.description" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog.visible = false">{{ $t('common.cancel') }}</el-button>
