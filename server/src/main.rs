@@ -1,4 +1,4 @@
-use app_server::{app, router};
+use app_server::core::{app, router};
 use salvo::prelude::*;
 #[tokio::main]
 async fn main() {
@@ -7,8 +7,7 @@ async fn main() {
     let _ = dotenvy::dotenv();
     let _guard = app::init_log();
     tracing::info!("Server boot starting");
-    let app_state = app::init_app()
-        .await
+    let app_state = app::init_app().await
         .unwrap_or_else(|e| panic!("failed to initialize app:{}", e.to_string()));
     let host = app_state.config.server.host.clone();
     let port = app_state.config.server.port;

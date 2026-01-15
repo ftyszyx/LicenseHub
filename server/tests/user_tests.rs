@@ -1,5 +1,6 @@
 use salvo::prelude::*;
 use salvo::test::TestClient;
+use app_server::core::constants;
 use serde_json::json;
 mod helpers;
 
@@ -160,7 +161,7 @@ async fn test_get_nonexistent_user() {
 		.send(&app)
 		.await;
 	let bodyjson = helpers::print_response_body_get_json(response, "get_nonexistent_user").await;
-	assert_eq!(bodyjson["code"], app_server::constants::APP_NOT_FOUND);
+	assert_eq!(bodyjson["code"], constants::APP_NOT_FOUND);
 }
 
 #[tokio::test]

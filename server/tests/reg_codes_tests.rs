@@ -1,4 +1,5 @@
 use salvo::prelude::*;
+use app_server::core::constants;
 use salvo::test::TestClient;
 use serde_json::json;
 use crate::helpers::print_response_body_get_json;
@@ -335,7 +336,7 @@ async fn test_delete_reg_code() {
         .send(&app)
         .await;
     let json = print_response_body_get_json(response, "delete_reg_code_response").await;
-    assert_eq!(json["code"].as_i64().unwrap(), app_server::constants::APP_NOT_FOUND as i64);
+    assert_eq!(json["code"].as_i64().unwrap(), constants::APP_NOT_FOUND as i64);
 }
 
 #[tokio::test]

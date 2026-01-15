@@ -189,31 +189,6 @@ rsync -avz web/ /opt/1panel/www/sites/index/
 ## 开发相关
 
 
-### 数据库迁移
-
-```
-cargo install sqlx-cli
-```
-
-```bash
-sqlx migrate run --database-url postgres://test:123456@localhost:5432/hub
-```
-
-清除
-```
-sqlx migrate revert --database-url postgres://test:123456@localhost:5432/hub
-sqlx migrate revert --target-version 0 --database-url postgres://test:123456@localhost:5432/hub
-
-```
-
-
-### 生成entity
-```
-cargo install sea-orm-cli
-```
-```
-sea-orm-cli generate entity -u "postgres://test:123456@localhost:5432/hub" -o "crates/data_model/src" --with-serde both
-```
 
 
 

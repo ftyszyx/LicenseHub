@@ -52,7 +52,7 @@ pub async fn init_app() -> Result<AppState, AppError> {
 
 pub async fn init_db(config: &DatabaseConfig) -> Result<DatabaseConnection, DbErr> {
     let dburl = format!(
-        "mysql://{}:{}@{}:{}/{}",
+        "postgres://{}:{}@{}:{}/{}",
         config.db_user, config.db_password, config.db_host, config.db_port, config.db_name
     );
     tracing::info!("Connecting to database: {}", dburl);

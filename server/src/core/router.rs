@@ -61,7 +61,7 @@ pub fn create_router(app_state: AppState) -> Service {
         .push(
             Router::with_path("/api/reg/validate").get(apis::reg_codes_handler::validate_code_get),
         )
-        .push(admin_routes)
+        .push(admin_routes);
     if register_open {
         router = router.push(Router::with_path("/api/register").post(apis::auth::register));
     }

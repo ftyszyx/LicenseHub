@@ -42,3 +42,4 @@ services:
       - /etc/timezone:/etc/timezone
     ports:
       - "6379:6379"
+    command: ["redis-server", "--requirepass", "123456"]

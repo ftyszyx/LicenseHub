@@ -1,13 +1,13 @@
 use crate::apis::auth_middleware::Claims;
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
-use crate::core::app::AppState;
-use crate::core::constants;
-use crate::core::my_error::AppError;
-use crate::core::response::ApiResponse;
+use crate::core::app::*;
+use crate::core::constants::{self};
+use crate::core::my_error::*;
+use crate::core::response::*;
 use chrono::Utc;
 use data_model::{user_roles, users};
 use salvo::{oapi::extract::JsonBody, prelude::*};
-use salvo_oapi::{ToSchema, extract::PathParam};
+use salvo_oapi::extract::PathParam;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     QueryOrder, Set,
@@ -29,7 +29,7 @@ pub struct UserUpdatePayload {
     pub role_ids: Option<Vec<i32>>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize )]
 pub struct UserWithRoles {
     pub user: users::Model,
     pub role_ids: Vec<i32>,

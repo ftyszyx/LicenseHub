@@ -1,4 +1,4 @@
-use app_server::{app, constants, router};
+use app_server::core::{app, constants, router};
 use http_body_util::BodyExt;
 use salvo::prelude::*;
 use salvo::test::TestClient;

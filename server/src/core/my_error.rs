@@ -1,4 +1,3 @@
-//! Defines custom error codes for the application.
 use crate::core::constants::*;
 use crate::core::response::ApiResponse;
 use salvo::{
