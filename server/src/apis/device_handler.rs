@@ -15,7 +15,6 @@ pub struct DeviceInfo {
     pub app_name: String,
     pub device_id: String,
     pub device_info: Option<sea_orm::prelude::Json>,
-    pub bind_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
@@ -29,7 +28,6 @@ impl TryFrom<(app_devices::Model, Option<apps::Model>)> for DeviceInfo {
             app_name: app.map(|a| a.name).unwrap_or_default(),
             device_id: app_device.device_id,
             device_info: app_device.device_info,
-            bind_time: app_device.bind_time,
             expire_time: app_device.expire_time,
         })
     }
@@ -61,7 +59,7 @@ pub async fn get_list_impl(
     let page_size = params.pagination.page_size.unwrap_or(20);
     let mut query = app_devices::Entity::find()
         .find_also_related(apps::Entity)
-        .order_by_desc(app_devices::Column::BindTime);
+        .order_by_desc(app_devices::Column::CreatedAt);
     if let Some(v) = params.app_id {
         query = query.filter(app_devices::Column::AppId.eq(v));
     }

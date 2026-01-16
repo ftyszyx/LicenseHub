@@ -83,8 +83,10 @@ CREATE TABLE "apps" (
     "app_download_url" VARCHAR(255) NOT NULL,
     "app_res_url" VARCHAR(255) NOT NULL,
     "app_update_info" TEXT,
+     "code_type" SMALLINT NOT NULL DEFAULT 0, -- 0: 时间类型 1：次数类型
     "app_valid_key" VARCHAR(255) NOT NULL DEFAULT '', -- 应用验证key
     "trial_days" INTEGER NOT NULL DEFAULT 0, -- 试用期时长
+    "trial_num" INTEGER NOT NULL DEFAULT 0, -- 试用次数
     "sort_order" INTEGER NOT NULL DEFAULT 0,
     "status" SMALLINT NOT NULL DEFAULT 0,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -99,8 +101,8 @@ CREATE TABLE "app_devices" (
     "app_id" INTEGER NOT NULL,
     "device_id" VARCHAR NOT NULL,
     "device_info" JSONB,
-    "bind_time" TIMESTAMPTZ,
-    "expire_time" TIMESTAMPTZ,
+    "expire_time" TIMESTAMPTZ,-- 最终过期时间(时间类型)
+    "remaining" INTEGER, -- 剩余次数（次数类型）
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "fk_app_device_app_id" FOREIGN KEY ("app_id") REFERENCES "apps" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -116,12 +118,10 @@ CREATE TABLE "reg_codes" (
     "app_id" INTEGER NOT NULL, -- 应用ID
     "valid_days" INTEGER NOT NULL DEFAULT 0, -- 有效天数 1: 1天 2: 3天 3: 7天 4: 30天
     "max_devices" INTEGER NOT NULL DEFAULT 1, -- 最大绑定设备数
-    "status" SMALLINT NOT NULL DEFAULT 0, -- 状态 0: 未使用 1: 已使用 2: 已过期
+    "status" SMALLINT NOT NULL DEFAULT 0, -- 状态 0: 未使用 1: 已使用(未绑定) 2: 已绑定
     "binding_time" TIMESTAMPTZ, -- 绑定时间
     "code_type" SMALLINT NOT NULL DEFAULT 0, -- 0: 时间类型 1：次数类型
-    "expire_time" TIMESTAMPTZ, -- 过期时间（时间类型）
     "total_count" INTEGER, -- 总次数（次数类型）
-    "use_count" INTEGER NOT NULL DEFAULT 0, -- 已使用次数
     "device_id" INTEGER, -- 绑定设备ID
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

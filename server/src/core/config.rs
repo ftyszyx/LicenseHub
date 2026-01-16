@@ -20,6 +20,7 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
     pub min_connections: u32,
     pub connect_timeout_secs: u64,
+    pub db_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,14 @@ impl DatabaseConfig {
                 .unwrap_or_else(|_| "8".to_string())
                 .parse()
                 .map_err(|_| AppError::Message("Invalid DB_CONNECT_TIMEOUT value".to_string()))?,
+            db_url: format!(
+                "postgres://{}:{}@{}:{}/{}",
+                env::var("DATABASE_USER").unwrap(),
+                env::var("DATABASE_PASSWORD").unwrap(),
+                env::var("DATABASE_HOST").unwrap(),
+                env::var("DATABASE_PORT").unwrap(),
+                env::var("DATABASE_NAME").unwrap()
+            ),
         })
     }
 }

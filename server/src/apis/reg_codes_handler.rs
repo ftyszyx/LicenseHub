@@ -2,14 +2,14 @@ use crate::apis::list_api::{ListParamsReq, PagingResponse};
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
-use chrono::Utc;
+use chrono::{DateTime, FixedOffset, Utc};
 use data_model::{app_devices, apps, reg_codes};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::extract::PathParam;
 use salvo_oapi::{ToSchema, endpoint};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, Set,
+    QueryOrder, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -50,7 +50,7 @@ impl From<CodeType> for i16 {
 pub enum RegCodeStatus {
     Unused = 0,
     Used = 1,
-    Expired = 2,
+    Binded = 2,
 }
 
 impl Default for RegCodeStatus {
@@ -64,7 +64,7 @@ impl From<i16> for RegCodeStatus {
         match value {
             0 => RegCodeStatus::Unused,
             1 => RegCodeStatus::Used,
-            2 => RegCodeStatus::Expired,
+            2 => RegCodeStatus::Binded,
             _ => RegCodeStatus::Unused,
         }
     }
@@ -139,9 +139,7 @@ pub struct RegCodeInfo {
     pub status: i16,
     pub binding_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub code_type: CodeType,
-    pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub total_count: Option<i32>,
-    pub use_count: i32,
     pub device_id: Option<i32>,
     pub device_id_str: Option<String>,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
@@ -178,9 +176,7 @@ impl
             status: reg_code.status,
             binding_time: reg_code.binding_time,
             code_type: CodeType::from(reg_code.code_type),
-            expire_time: reg_code.expire_time,
             total_count: reg_code.total_count,
-            use_count: reg_code.use_count,
             device_id: reg_code.device_id,
             device_id_str,
             device_info,
@@ -204,9 +200,7 @@ impl TryFrom<reg_codes::Model> for RegCodeInfo {
             status: reg_code.status,
             binding_time: reg_code.binding_time,
             code_type: CodeType::from(reg_code.code_type),
-            expire_time: reg_code.expire_time,
             total_count: reg_code.total_count,
-            use_count: reg_code.use_count,
             device_id: reg_code.device_id,
             device_id_str: None,
             device_info: None,
@@ -238,9 +232,7 @@ pub async fn add_impl(state: &AppState, req: CreateRegCodeReq) -> Result<RegCode
         max_devices: Set(req.max_devices),
         status: Set(i16::from(req.status)),
         code_type: Set(i16::from(req.code_type)),
-        expire_time: Set(req.expire_time),
         total_count: Set(req.total_count),
-        use_count: Set(0),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -459,134 +451,254 @@ pub async fn validate_code_impl(
     req: RegCodeValidateReq,
 ) -> Result<RegCodeValidateResp, AppError> {
     // find app by app_valid_key
-    let app = apps::Entity::find()
+    let app_model = apps::Entity::find()
         .filter(apps::Column::AppValidKey.eq(req.app_key.clone()))
         .one(&state.db)
-        .await?;
-    let app = app.ok_or(AppError::not_found("apps".to_string(), None))?;
-    let now = Utc::now().fixed_offset();
-    // let app_expire = now + chrono::Duration::days(app.trial_days as i64);
-    let code = req.code.clone();
+        .await?
+        .ok_or(AppError::not_found("apps".to_string(), None))?;
+
+    let device_id = req.device_id.clone();
+    let code_is_none = req.code.as_deref().map(|c| c.is_empty()).unwrap_or(true);
+    // find or create device
     let dev = app_devices::Entity::find()
         .filter(
             app_devices::Column::AppId
-                .eq(app.id)
-                .and(app_devices::Column::DeviceId.eq(req.device_id.clone())),
+                .eq(app_model.id)
+                .and(app_devices::Column::DeviceId.eq(device_id.clone())),
         )
         .one(&state.db)
         .await?;
-    let mut device_expire = now + chrono::Duration::days(app.trial_days as i64);
-    let mut _dev_id = None;
-    let code_is_none = code.is_none() || code.unwrap().is_empty();
-    if dev.is_none() {
-        //bind device
-        let dev_tmp = app_devices::ActiveModel {
-            app_id: Set(app.id),
-            device_id: Set(req.device_id.clone()),
-            device_info: Set(None),
-            bind_time: Set(Some(Utc::now().fixed_offset())),
-            expire_time: Set(Some(device_expire)),
-            ..Default::default()
-        }
-        .insert(&state.db)
-        .await?;
-        _dev_id = Some(dev_tmp.id);
-    } else {
-        device_expire = dev.as_ref().unwrap().expire_time.unwrap();
-        _dev_id = Some(dev.as_ref().unwrap().id);
-        if now > device_expire && code_is_none {
-            return Err(AppError::Message("device expired".into()));
-        }
-    }
+    // trial-only mode
     if code_is_none {
-        //没有注册码，只有试用期
-        return Ok(RegCodeValidateResp {
-            code_type: CodeType::Time,
-            expire_time: Some(device_expire),
-            remaining_count: None,
-        });
+        return trial_validate(state, &app_model, &device_id, dev).await;
     }
+
     // find reg code
-    let regcode_model = reg_codes::Entity::find()
+    let code = req.code.clone().unwrap();
+    let reg_code_model = reg_codes::Entity::find()
         .filter(
-            reg_codes::Column::Code
-                .eq(req.code.clone())
-                .and(reg_codes::Column::AppId.eq(app.id)),
+            reg_codes::Column::AppId
+                .eq(app_model.id)
+                .and(reg_codes::Column::Code.eq(code)),
         )
         .one(&state.db)
-        .await?;
-    let regcode_model = regcode_model.ok_or(AppError::not_found("reg_code".to_string(), None))?;
-    // logic by type
-    let mut active = regcode_model.clone().into_active_model();
-    match regcode_model.code_type.into() {
+        .await?
+        .ok_or(AppError::not_found("reg_code".to_string(), None))?;
+    match app_model.code_type.into() {
         CodeType::Time => {
-            // time-based
-            let reg_code_expire = regcode_model.expire_time.or_else(|| {
-                //如果注册码没有过期时间，则使用注册码的过期时间
-                Some(now + chrono::Duration::days(regcode_model.valid_days as i64))
-            });
-            if let Some(exp) = reg_code_expire {
-                if now > exp {
-                    active.status = Set(RegCodeStatus::Expired.into());
-                    active.update(&state.db).await?;
-                    return Err(AppError::Message("code expired".into()));
+            time_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await
+        }
+        CodeType::Count => {
+            count_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await
+        }
+    }
+}
+//试用
+pub async fn trial_validate(
+    state: &AppState,
+    app_model: &apps::Model,
+    device_id: &str,
+    device_model: Option<app_devices::Model>,
+) -> Result<RegCodeValidateResp, AppError> {
+    let now = Utc::now().fixed_offset();
+    match app_model.code_type.into() {
+        CodeType::Time => {
+            let trial_expire = now + chrono::Duration::days(app_model.trial_days as i64);
+            match device_model {
+                Some(d) => {
+                    let device_expire = d.expire_time.unwrap_or(trial_expire);
+                    if now > device_expire {
+                        return Err(AppError::Message("device expired".into()));
+                    }
                 }
-            }
-            // bind device id
-            if regcode_model.device_id.is_none() {
-                // create or find app_device
-                active.device_id = Set(_dev_id);
-                active.status = Set(RegCodeStatus::Used.into());
-                active.binding_time = Set(Some(Utc::now().fixed_offset()));
-                active.expire_time = Set(reg_code_expire);
-                active.update(&state.db).await?;
+                None => {
+                    if app_model.trial_days <= 0 {
+                        return Err(AppError::Message("app has no trial".into()));
+                    }
+                    // 创建新的设备记录
+                    app_devices::ActiveModel {
+                        app_id: Set(app_model.id),
+                        device_id: Set(device_id.to_string()),
+                        device_info: Set(None),
+                        expire_time: Set(Some(trial_expire)),
+                        ..Default::default()
+                    }
+                    .insert(&state.db)
+                    .await?;
+                }
             }
             Ok(RegCodeValidateResp {
                 code_type: CodeType::Time,
-                expire_time: reg_code_expire,
+                expire_time: Some(trial_expire),
                 remaining_count: None,
             })
         }
         CodeType::Count => {
-            // count-based
-            let total = regcode_model.total_count.unwrap_or(0);
-            let used = regcode_model.use_count;
-            if used >= total {
-                return Err(AppError::Message("code used up".into()));
-            }
-            active.use_count = Set(used + 1);
-            if regcode_model.device_id.is_none() {
-                let dev = app_devices::Entity::find()
-                    .filter(
-                        app_devices::Column::AppId
-                            .eq(app.id)
-                            .and(app_devices::Column::DeviceId.eq(req.device_id.clone())),
-                    )
-                    .one(&state.db)
-                    .await?;
-                let dev_id = if let Some(d) = dev {
-                    d.id
-                } else {
-                    app_devices::ActiveModel {
-                        app_id: Set(app.id),
-                        device_id: Set(req.device_id.clone()),
-                        device_info: Set(None),
-                        bind_time: Set(Some(Utc::now().fixed_offset())),
-                        ..Default::default()
+            let mut new_remaining = 0;
+            match device_model {
+                Some(d) => {
+                    let remaining = d.remaining.unwrap_or(0);
+                    if remaining <= 0 {
+                        return Err(AppError::Message("trial used up".into()));
                     }
-                    .insert(&state.db)
-                    .await?
-                    .id
-                };
-                active.device_id = Set(Some(dev_id));
+                    new_remaining = remaining - 1;
+                }
+                None => {
+                    if app_model.trial_num <= 0 {
+                        return Err(AppError::Message("app has no trial".into()));
+                    }
+                }
             }
-            active.status = Set(1);
-            active.update(&state.db).await?;
+            app_devices::ActiveModel {
+                app_id: Set(app_model.id),
+                device_id: Set(device_id.to_string()),
+                device_info: Set(None),
+                remaining: Set(Some(new_remaining)),
+                ..Default::default()
+            }
+            .insert(&state.db)
+            .await?;
             Ok(RegCodeValidateResp {
                 code_type: CodeType::Count,
                 expire_time: None,
-                remaining_count: Some(total - used - 1),
+                remaining_count: Some(new_remaining),
             })
         }
     }
+}
+
+//时间类型注册码验证
+pub async fn time_reg_code_validate(
+    state: &AppState,
+    app_model: &apps::Model,
+    device_id: &str,
+    device_model: Option<app_devices::Model>,
+    reg_code_model: &reg_codes::Model,
+) -> Result<RegCodeValidateResp, AppError> {
+    let now = Utc::now().fixed_offset();
+    if CodeType::from(reg_code_model.code_type) != CodeType::Time {
+        return Err(AppError::Message("code type is not time".into()));
+    }
+    // update reg_code binding if needed
+    if reg_code_model.device_id.is_none() {
+        let tx = state.db.begin().await?;
+        let mut active_reg_model = reg_code_model.clone().into_active_model();
+        active_reg_model.binding_time = Set(Some(now));
+        active_reg_model.status = Set(RegCodeStatus::Binded.into());
+        let expire_time: DateTime<FixedOffset> = match device_model {
+            Some(dm) => {
+                active_reg_model.device_id = Set(Some(dm.id));
+                let device_expire = dm.expire_time.unwrap_or(now);
+                let expire_time =
+                    device_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
+                let active_device_model = dm.into_active_model();
+                active_device_model.update(&tx).await?;
+                expire_time
+            }
+            None => {
+                let expire_time = now + chrono::Duration::days(reg_code_model.valid_days as i64);
+                //add device
+                let device_active = app_devices::ActiveModel {
+                    app_id: Set(app_model.id),
+                    device_id: Set(device_id.to_string()),
+                    expire_time: Set(Some(expire_time)),
+                    ..Default::default()
+                };
+                let inserted_device = device_active.insert(&tx).await?;
+                active_reg_model.device_id = Set(Some(inserted_device.id));
+                expire_time
+            }
+        };
+        active_reg_model.update(&tx).await?;
+        tx.commit().await?;
+        return Ok(RegCodeValidateResp {
+            code_type: CodeType::Time,
+            expire_time: Some(expire_time),
+            remaining_count: None,
+        });
+    }
+
+    // update device final expire_time (cache) if needed
+    let device_model = device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
+    let current_device_expire = device_model.expire_time.unwrap_or(now);
+    if current_device_expire <= now {
+        return Err(AppError::Message("device expired".into()));
+    }
+    Ok(RegCodeValidateResp {
+        code_type: CodeType::Time,
+        expire_time: Some(current_device_expire),
+        remaining_count: None,
+    })
+}
+
+//次数类型注册码验证
+pub async fn count_reg_code_validate(
+    state: &AppState,
+    app_model: &apps::Model,
+    device_id: &str,
+    device_model: Option<app_devices::Model>,
+    reg_code_model: &reg_codes::Model,
+) -> Result<RegCodeValidateResp, AppError> {
+    let now = Utc::now().fixed_offset();
+    if CodeType::from(reg_code_model.code_type) != CodeType::Count {
+        return Err(AppError::Message("code type is not count".into()));
+    }
+    if reg_code_model.device_id.is_some() {
+        let device_model =
+            device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
+        let remaining = device_model.remaining.unwrap_or(0);
+        if remaining <= 0 {
+            return Err(AppError::Message("device remaining count is 0".into()));
+        }
+        return Ok(RegCodeValidateResp {
+            code_type: CodeType::Count,
+            expire_time: None,
+            remaining_count: Some(remaining),
+        });
+    }
+
+    let ctx = state.db.begin().await?;
+    let mut reg_code_active = reg_code_model.clone().into_active_model();
+    reg_code_active.binding_time = Set(Some(now));
+    let remain_count_after = match device_model {
+        Some(device_model) => {
+            // update device
+            let remain_count_before = device_model.remaining.unwrap_or(0);
+            if remain_count_before <= 0 {
+                return Err(AppError::Message("device remaining count is 0".into()));
+            }
+            let remain_count_after = remain_count_before - 1;
+
+            reg_code_active.device_id = Set(Some(device_model.id));
+            let mut active_device_model = device_model.into_active_model();
+            active_device_model.remaining = Set(Some(remain_count_after));
+            active_device_model.update(&ctx).await?;
+            remain_count_after
+        }
+        None => {
+            // add device
+            let remain_count_before = reg_code_model.total_count.unwrap_or(0);
+            if remain_count_before <= 0 {
+                return Err(AppError::Message("reg code remaining count is 0".into()));
+            }
+            let remain_count_after = remain_count_before - 1;
+
+            let device_active = app_devices::ActiveModel {
+                app_id: Set(app_model.id),
+                device_id: Set(device_id.to_string()),
+                remaining: Set(Some(remain_count_after)),
+                ..Default::default()
+            };
+            let inserted_device = device_active.insert(&ctx).await?;
+            reg_code_active.device_id = Set(Some(inserted_device.id));
+            remain_count_after
+        }
+    };
+    reg_code_active.update(&ctx).await?;
+    ctx.commit().await?;
+    return Ok(RegCodeValidateResp {
+        code_type: CodeType::Count,
+        expire_time: None,
+        remaining_count: Some(remain_count_after),
+    });
 }

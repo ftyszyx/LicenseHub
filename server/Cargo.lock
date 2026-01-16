@@ -137,6 +137,7 @@ dependencies = [
  "hyper",
  "jsonwebtoken",
  "mime",
+ "once_cell",
  "percent-encoding",
  "redis",
  "reqwest",

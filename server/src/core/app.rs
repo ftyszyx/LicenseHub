@@ -51,12 +51,8 @@ pub async fn init_app() -> Result<AppState, AppError> {
 }
 
 pub async fn init_db(config: &DatabaseConfig) -> Result<DatabaseConnection, DbErr> {
-    let dburl = format!(
-        "postgres://{}:{}@{}:{}/{}",
-        config.db_user, config.db_password, config.db_host, config.db_port, config.db_name
-    );
-    tracing::info!("Connecting to database: {}", dburl);
-    let mut opt = ConnectOptions::new(&dburl);
+    tracing::info!("Connecting to database: {}", config.db_url);
+    let mut opt = ConnectOptions::new(&config.db_url);
     opt.max_connections(config.max_connections)
         .min_connections(config.min_connections)
         .connect_timeout(Duration::from_secs(config.connect_timeout_secs))

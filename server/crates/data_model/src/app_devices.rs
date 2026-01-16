@@ -12,8 +12,8 @@ pub struct Model {
     pub device_id: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub device_info: Option<Json>,
-    pub bind_time: Option<DateTimeWithTimeZone>,
     pub expire_time: Option<DateTimeWithTimeZone>,
+    pub remaining: Option<i32>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

@@ -8,6 +8,8 @@ WORKDIR /usr/src/app
 RUN mkdir -p .cargo && \
     printf '[source.crates-io]\nreplace-with = "aliyun"\n\n[source.aliyun]\nregistry = "sparse+https://mirrors.aliyun.com/crates.io-index/"\n' > .cargo/config.toml
 # Copy entire workspace and build
+# Install sqlx-cli for running migrations at runtime
+RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -25,7 +27,9 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
  && apt-get install -y --no-install-recommends pkg-config libssl-dev libpq-dev nodejs npm curl \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/src/out/app_server .
-# COPY casbin_model.conf .
+COPY --from=builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
+COPY migrations/ ./migrations/
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 EXPOSE 3000
-CMD ["./app_server"]
-# CMD ["/bin/bash"]
+CMD ["./entrypoint.sh"]
