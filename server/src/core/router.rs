@@ -161,7 +161,6 @@ pub fn create_router(app_state: AppState) -> Service {
         .hoop(affix_state::inject(app_state))
         .push(Router::with_path("/api/login").post(apis::auth::login))
         .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
-        .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
         .push(
             Router::with_path("/api/reg/validate").get(apis::reg_codes_handler::validate_code_get),
         )

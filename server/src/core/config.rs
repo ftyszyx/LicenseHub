@@ -29,6 +29,7 @@ pub struct RedisConfig {
     pub host: String,
     pub username: String,
     pub password: String,
+    pub key_prefix: String,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +115,8 @@ impl RedisConfig {
                 .map_err(|_| AppError::Message("REDIS_USERNAME must be set".to_string()))?,
             password: env::var("REDIS_PASSWORD")
                 .map_err(|_| AppError::Message("REDIS_PASSWORD must be set".to_string()))?,
+            key_prefix: env::var("REDIS_KEY_PREFIX")
+                .unwrap_or_else(|_| "hub_".to_string()),
         })
     }
 }

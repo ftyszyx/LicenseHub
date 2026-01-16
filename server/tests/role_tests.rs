@@ -5,7 +5,7 @@ mod helpers;
 #[tokio::test]
 async fn test_get_roles_list() {
 	let app = helpers::create_test_app().await;
-	let token = helpers::create_test_user_and_login(&app).await;
+	let token = helpers::login_admin(&app).await;
 	let response = TestClient::get(helpers::get_url("/api/admin/roles/list?page=1&page_size=10"))
 		.add_header("authorization", format!("Bearer {}", token), true)
 		.send(&app)
@@ -20,7 +20,7 @@ async fn test_get_roles_list() {
 #[tokio::test]
 async fn test_roles_pagination() {
 	let app = helpers::create_test_app().await;
-	let token = helpers::create_test_user_and_login(&app).await;
+	let token = helpers::login_admin(&app).await;
 	let test_cases = vec![
 		helpers::get_url("/api/admin/roles/list?page=1&page_size=5"),
 		helpers::get_url("/api/admin/roles/list"),

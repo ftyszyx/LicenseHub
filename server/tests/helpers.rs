@@ -1,5 +1,4 @@
 use app_server::core::app;
-use app_server::core::constants::*;
 use app_server::core::router;
 use once_cell::sync::Lazy;
 use salvo::prelude::*;
@@ -24,30 +23,21 @@ pub struct TestContext {
 }
 
 #[allow(dead_code)]
-pub fn db_url_from_env() -> String {
-    let user = env::var("DATABASE_USER").unwrap();
-    let password = env::var("DATABASE_PASSWORD").unwrap();
-    let host = env::var("DATABASE_HOST").unwrap();
-    let port = env::var("DATABASE_PORT").unwrap();
-    let name = env::var("DATABASE_NAME").unwrap();
-    format!(
-        "postgres://{}:{}@{}:{}/{}",
-        user, password, host, port, name
-    )
-}
-
-#[allow(dead_code)]
 impl TestContext {
     pub async fn new() -> Self {
         create_test_context().await
     }
 
     pub async fn login_default_user(&mut self) {
-        self.token = create_test_user_and_login(&self.app).await;
+        self.token = login_admin(&self.app).await;
     }
 
     pub fn bearer_token(&self) -> String {
         bearer(&self.token)
+    }
+
+    pub fn get_db_url(&self) -> String {
+        self.app_state.config.database.db_url.clone()
     }
 }
 
@@ -96,28 +86,10 @@ pub async fn print_response_body_get_json(
 }
 
 #[allow(dead_code)]
-pub async fn create_test_user_and_login(app: &Service) -> String {
-    // 注册用户
-    let register_body = json!({
-        "username": "testuser",
-        "password": "testpass123"
-    });
-    let url = get_url("/api/register");
-    let response = TestClient::post(url)
-        .add_header("content-type", "application/json", true)
-        .json(&register_body)
-        .send(app)
-        .await;
-
-    println!("register_body: {:?}", register_body);
-    let json = print_response_body_get_json(response, "register_response").await;
-    let code = json["code"].as_u64().unwrap();
-    assert!(code == 0 || code == APP_USER_ALREADY_EXISTS as u64);
-
-    // 登录获取 token
+pub async fn login_admin(app: &Service) -> String {
     let login_body = json!({
-        "username": "testuser",
-        "password": "testpass123"
+        "username": "admin",
+        "password": "admin"
     });
 
     let url = get_url("/api/login");
@@ -127,7 +99,7 @@ pub async fn create_test_user_and_login(app: &Service) -> String {
         .send(app)
         .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
-    let json = print_response_body_get_json(response, "login_response").await;
+    let json = print_response_body_get_json(response, "admin_login_response").await;
     json["data"]["token"].as_str().unwrap().to_string()
 }
 

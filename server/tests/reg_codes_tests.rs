@@ -531,8 +531,7 @@ async fn test_count_reg_code_activation_and_exhaust() {
     let json = print_response_body_get_json(resp, "create_app_count_activation").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
 
-    dotenvy::from_filename(".env.test").unwrap();
-    let pool = sqlx::PgPool::connect(&helpers::db_url_from_env())
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url())
         .await
         .unwrap();
     sqlx::query("update apps set code_type = 1 where id = $1")

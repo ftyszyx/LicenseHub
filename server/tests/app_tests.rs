@@ -7,7 +7,7 @@ mod helpers;
 #[tokio::test]
 async fn test_get_apps_list() {
     let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let token = helpers::login_admin(&app).await;
     let url=helpers::get_url("/api/admin/apps/list?page=1&page_size=10");
     let response= TestClient::get(url).add_header("authorization", format!("Bearer {}", token),true).send(&app).await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
@@ -20,7 +20,7 @@ async fn test_get_apps_list() {
 #[tokio::test]
 async fn test_create_app() {
     let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let token = helpers::login_admin(&app).await;
 
     let create_app_body = json!({
         "name": format!("TestApp_{}", chrono::Utc::now().timestamp()),
@@ -36,6 +36,7 @@ async fn test_create_app() {
 
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
         .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
         .json(&create_app_body)
         .send(&app)
         .await;
@@ -48,7 +49,7 @@ async fn test_create_app() {
 #[tokio::test]
 async fn test_get_app_by_id() {
     let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let token = helpers::login_admin(&app).await;
 
     // 先创建一个应用
     let create_app_body = json!({
@@ -65,6 +66,7 @@ async fn test_get_app_by_id() {
 
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
         .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
         .json(&create_app_body)
         .send(&app)
         .await;
@@ -87,7 +89,7 @@ async fn test_get_app_by_id() {
 #[tokio::test]
 async fn test_update_app() {
     let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let token = helpers::login_admin(&app).await;
 
     // 先创建一个应用
     let create_app_body = json!({
@@ -104,6 +106,7 @@ async fn test_update_app() {
 
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
         .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
         .json(&create_app_body)
         .send(&app)
         .await;
@@ -120,6 +123,7 @@ async fn test_update_app() {
     let url = helpers::get_url(&format!("/api/admin/apps/{}", app_id));
     let response = TestClient::put(url)
         .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
         .json(&update_app_body)
         .send(&app)
         .await;
@@ -131,7 +135,7 @@ async fn test_update_app() {
 #[tokio::test]
 async fn test_delete_app() {
     let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let token = helpers::login_admin(&app).await;
 
     // 先创建一个应用
     let create_app_body = json!({
@@ -148,6 +152,7 @@ async fn test_delete_app() {
 
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
         .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
         .json(&create_app_body)
         .send(&app)
         .await;
@@ -169,7 +174,7 @@ async fn test_delete_app() {
 #[tokio::test]
 async fn test_apps_pagination() {
     let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let token = helpers::login_admin(&app).await;
 
     // 测试不同的分页参数
     let test_cases = vec![
