@@ -1,6 +1,6 @@
 import request from '@/utils/request'
 import type { ApiResponse, PagingResponse } from '@/types'
-import type { ListRegCodesParams, RegCodeModel, BatchCreateRegCodesReq } from '@/types/reg_codes'
+import type { ListRegCodesParams, RegCodeModel, BatchCreateRegCodesReq, RegCodeStatus } from '@/types/reg_codes'
 
 export const fetchRegCodes = async (params: ListRegCodesParams = {}) => {
   const response = await request.get('/admin/reg_codes/list', { params }) as ApiResponse<PagingResponse<RegCodeModel>>
@@ -9,6 +9,11 @@ export const fetchRegCodes = async (params: ListRegCodesParams = {}) => {
 
 export const deleteRegCode = async (id: number) => {
   const response = await request.delete(`/admin/reg_codes/${id}`) as ApiResponse<void>
+  return response.data
+}
+
+export const updateRegCodeStatus = async (id: number, status: RegCodeStatus) => {
+  const response = await request.put(`/admin/reg_codes/${id}/status`, { status }) as ApiResponse<RegCodeModel>
   return response.data
 }
 

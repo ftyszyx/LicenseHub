@@ -49,6 +49,16 @@
         <el-table-column :label="$t('apps.trial_days')" width="120">
           <template #default="{ row }">{{ row.trial_days }}</template>
         </el-table-column>
+        <el-table-column :label="$t('apps.trial_num')" width="120">
+          <template #default="{ row }">{{ row.trial_num }}</template>
+        </el-table-column>
+        <el-table-column :label="$t('apps.code_type')" width="120">
+          <template #default="{ row }">
+            <span v-if="row.code_type === RegCodeType.Time">{{ $t('reg_codes.type_time') }}</span>
+            <span v-else-if="row.code_type === RegCodeType.Count">{{ $t('reg_codes.type_count') }}</span>
+            <span v-else>{{ row.code_type }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" :label="$t('apps.status')" width="100">
           <template #default="scope">
             <el-tag :type="scope.row.status === 1 ? 'success' : 'info'">{{
@@ -113,7 +123,11 @@
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item :label="$t('apps.app_id')" prop="app_id">
-          <el-input v-model="form.app_id" />
+          <el-input v-model="form.app_id">
+            <template #append>
+              <el-button @click="genAppId">{{ $t('common.generate') }}</el-button>
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item :label="$t('apps.version_name')" prop="app_vername">
           <el-input v-model="form.app_vername" />
@@ -137,8 +151,17 @@
             </template>
           </el-input>
         </el-form-item>
-        <el-form-item :label="$t('apps.trial_days')" prop="trial_days">
+        <el-form-item :label="$t('apps.code_type')" prop="code_type">
+          <el-select v-model.number="(form as any).code_type" style="width: 160px" @change="onCodeTypeChange">
+            <el-option :label="$t('reg_codes.type_time')" :value="RegCodeType.Time" />
+            <el-option :label="$t('reg_codes.type_count')" :value="RegCodeType.Count" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="(form as any).code_type === RegCodeType.Time" :label="$t('apps.trial_days')" prop="trial_days">
           <el-input-number v-model.number="(form as any).trial_days" :min="0" />
+        </el-form-item>
+        <el-form-item v-if="(form as any).code_type === RegCodeType.Count" :label="$t('apps.trial_num')" prop="trial_num">
+          <el-input-number v-model.number="(form as any).trial_num" :min="0" />
         </el-form-item>
         <el-form-item :label="$t('apps.sort_order')" prop="sort_order">
           <el-input-number v-model="form.sort_order" :min="0" />
@@ -167,6 +190,7 @@ import type { AppModel, AddAppReq, UpdateAppReq } from "@/types/apps";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
 import { useI18n } from 'vue-i18n'
+import { RegCodeType } from '@/types/reg_codes'
 
 const apps = ref<AppModel[]>([]);
 const page = ref(1);
@@ -209,8 +233,10 @@ const emptyForm: AddAppReq = {
   app_download_url: "",
   app_res_url: "",
   app_update_info: "",
+  code_type: 0,
   app_valid_key: "",
   trial_days: 0,
+  trial_num: 0,
   sort_order: 0,
   status: 1,
 };
@@ -225,8 +251,17 @@ const rules = reactive<FormRules<AddAppReq>>({
   app_vercode: [{ required: true, message: t("apps.input_version_code") }],
 });
 
+const onCodeTypeChange = () => {
+  if ((form as any).code_type === RegCodeType.Time) {
+    ;(form as any).trial_num = 0
+  } else if ((form as any).code_type === RegCodeType.Count) {
+    ;(form as any).trial_days = 0
+  }
+}
+
 const openCreate = () => {
   Object.assign(form, emptyForm);
+  onCodeTypeChange();
   dialog.mode = "create";
   dialog.editingId = undefined;
   dialog.visible = true;
@@ -243,11 +278,14 @@ const openEdit = (row: AppModel) => {
     app_download_url: row.app_download_url,
     app_res_url: row.app_res_url,
     app_update_info: row.app_update_info || "",
+    code_type: (row as any).code_type ?? 0,
     app_valid_key: row.app_valid_key || "",
     trial_days: row.trial_days ?? 0,
+    trial_num: (row as any).trial_num ?? 0,
     sort_order: row.sort_order,
     status: row.status,
   });
+  onCodeTypeChange();
   dialog.visible = true;
 };
 
@@ -274,6 +312,22 @@ function genAppKey(){
   const ts = Date.now().toString(36)
   const rand = Math.random().toString(36).slice(2)
   ;(form as any).app_valid_key = `${ts}-${rand}`
+}
+
+function genAppId(){
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const len = 12
+  if (typeof crypto !== 'undefined' && 'getRandomValues' in crypto) {
+    const array = new Uint8Array(len)
+    crypto.getRandomValues(array)
+    form.app_id = Array.from(array, n => alphabet[n % alphabet.length]).join('')
+  } else {
+    let s = ''
+    for (let i = 0; i < len; i++) {
+      s += alphabet[Math.floor(Math.random() * alphabet.length)]
+    }
+    form.app_id = s
+  }
 }
 
 const confirmDelete = async (row: AppModel) => {

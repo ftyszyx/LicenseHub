@@ -7,6 +7,7 @@ export interface DeviceInfo {
   device_info?: any | null
   bind_time?: string | null
   expire_time?: string | null
+  remaining?: number | null
 }
 export type ListDevicesParams = {
   app_id?: number

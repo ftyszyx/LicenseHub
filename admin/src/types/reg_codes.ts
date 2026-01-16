@@ -10,9 +10,7 @@ export interface RegCodeModel {
   status: RegCodeStatus
   binding_time?: string | null
   code_type: RegCodeType
-  expire_time?: string | null
   total_count?: number | null
-  use_count: number
   device_id?: string | null
   created_at: string
   updated_at: string
@@ -27,7 +25,7 @@ export enum RegCodeType {
 export enum RegCodeStatus {
   Unused = 0,
   Used = 1,
-  Expired = 2,
+  binded = 2,
 }
 
 export type ListRegCodesParams = {

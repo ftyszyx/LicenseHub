@@ -22,6 +22,7 @@
         <el-table-column :label="$t('devices.expire_time')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.expire_time) }}</template>
         </el-table-column>
+        <el-table-column prop="remaining" :label="$t('devices.remaining')" width="120" />
       </el-table>
       <div class="flex justify-end mt-4">
         <el-pagination background layout="total, sizes, prev, pager, next, jumper" :page-sizes="[10, 20, 50, 100]" :page-size="pageSize" :current-page="page" :total="total" @current-change="handlePageChange" @size-change="handleSizeChange" />

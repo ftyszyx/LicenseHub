@@ -133,6 +133,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .put(apis::reg_codes_handler::update),
         )
         .push(
+            Router::with_path("reg_codes/{id}/status")
+                .hoop(RequirePerm::new("reg_codes", "UPDATE"))
+                .put(apis::reg_codes_handler::update_status),
+        )
+        .push(
             Router::with_path("reg_codes/{id}")
                 .hoop(RequirePerm::new("reg_codes", "DELETE"))
                 .delete(apis::reg_codes_handler::delete),

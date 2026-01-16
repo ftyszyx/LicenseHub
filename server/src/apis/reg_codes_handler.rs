@@ -113,6 +113,11 @@ pub struct UpdateRegCodeReq {
     pub total_count: Option<i32>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
+pub struct UpdateRegCodeStatusReq {
+    pub status: RegCodeStatus,
+}
+
 #[derive(Deserialize, Debug, Default)]
 pub struct SearchRegCodesParams {
     #[serde(flatten)]
@@ -303,6 +308,57 @@ pub async fn update_impl(
     let updated_reg_code = reg_code.update(&state.db).await?;
 
     // Fetch with app information for response
+    let result = reg_codes::Entity::find_by_id(updated_reg_code.id)
+        .find_also_related(apps::Entity)
+        .find_also_related(app_devices::Entity)
+        .one(&state.db)
+        .await?;
+
+    match result {
+        Some((reg_code, app, device)) => Ok(RegCodeInfo::try_from((reg_code, app, device))?),
+        None => Err(AppError::not_found(
+            "reg_codes".to_string(),
+            Some(updated_reg_code.id),
+        )),
+    }
+}
+
+// Update RegCode Status
+#[handler]
+pub async fn update_status(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+    req: JsonBody<UpdateRegCodeStatusReq>,
+) -> Result<ApiResponse<RegCodeInfo>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let reg_code = update_status_impl(&state, id.into_inner(), req.into_inner()).await?;
+    Ok(ApiResponse::success(reg_code))
+}
+
+pub async fn update_status_impl(
+    state: &AppState,
+    id: i32,
+    req: UpdateRegCodeStatusReq,
+) -> Result<RegCodeInfo, AppError> {
+    let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
+    let reg_code = reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+
+    if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded {
+        return Err(AppError::business_logic(
+            "REG_CODE_STATUS_LOCKED",
+            "reg code is binded, status cannot be changed",
+        ));
+    }
+
+    if req.status == RegCodeStatus::Binded {
+        return Err(AppError::validation("cannot set reg_code status to binded"));
+    }
+
+    let mut active: reg_codes::ActiveModel = reg_code.into_active_model();
+    active.status = Set(i16::from(req.status));
+    active.updated_at = Set(Utc::now().fixed_offset());
+    let updated_reg_code = active.update(&state.db).await?;
+
     let result = reg_codes::Entity::find_by_id(updated_reg_code.id)
         .find_also_related(apps::Entity)
         .find_also_related(app_devices::Entity)

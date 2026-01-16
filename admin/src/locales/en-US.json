@@ -17,6 +17,7 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "deleted": "Deleted",
+    "saved": "Saved",
     "created": "Created",
     "copied": "Copied",
     "copy_failed": "Copy failed",
@@ -88,9 +89,7 @@
     "app": "App",
     "valid_days": "Valid days",
     "binding_time": "Binding time",
-    "expire_time": "Expire time",
     "total_count": "Total count",
-    "used_count": "Used count",
     "status": "Status",
     "created": "Created",
     "quantity": "Quantity",
@@ -98,7 +97,10 @@
     "type_count": "Count",
     "status_unused": "Unused",
     "status_used": "Used",
-    "status_expired": "Expired",
+    "status_binded": "Binded",
+    "mark_used": "Mark Used",
+    "mark_used_confirm": "Mark this code as used?",
+    "status_locked": "Binded reg code status cannot be changed",
     "device_id": ""
   },
   "products": {
@@ -158,6 +160,8 @@
     "version": "Version",
     "valid_key": "Secret key",
     "trial_days": "Trial days",
+    "trial_num": "Trial num",
+    "code_type": "Code type",
     "status": "Status",
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -198,6 +202,7 @@
     "device_id": "",
     "binding_time": "",
     "expire_time": "",
+    "remaining": "Remaining",
     "apptitle": ""
   }
 }

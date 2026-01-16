@@ -12,6 +12,9 @@
             <el-option :label="$t('reg_codes.type_time')" :value="RegCodeType.Time" />
             <el-option :label="$t('reg_codes.type_count')" :value="RegCodeType.Count" />
           </el-select>
+          <el-select v-model="query.status" :placeholder="$t('reg_codes.status')" clearable class="w-36">
+            <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
           <el-button type="primary" @click="reload">{{ $t('common.search') }}</el-button>
           <el-button @click="resetFilters">{{ $t('common.reset') }}</el-button>
           <el-button type="success" @click="openBatchDialog">{{ $t('reg_codes.batch_create') }}</el-button>
@@ -45,22 +48,17 @@
           <el-table-column prop="binding_time" :label="$t('reg_codes.binding_time')" width="180">
             <template #default="{ row }">{{ formatTime(row.binding_time) }}</template>
           </el-table-column>
-          <el-table-column prop="expire_time" :label="$t('reg_codes.expire_time')" width="180">
-            <template #default="{ row }">{{ formatTime(row.expire_time) }}</template>
-          </el-table-column>
         </template>
         <template v-if="query.code_type === RegCodeType.Count">
           <el-table-column prop="total_count" :label="$t('reg_codes.total_count')" width="120">
-          </el-table-column>
-          <el-table-column prop="use_count" :label="$t('reg_codes.used_count')" width="120">
           </el-table-column>
         </template>
         <el-table-column prop="status" :label="$t('reg_codes.status')" width="100">
           <template #default="{ row }">
             <!-- //i18n-key: reg_codes.status_unused -->
             <!-- //i18n-key: reg_codes.status_used -->
-            <!-- //i18n-key: reg_codes.status_expired -->
-            <span>{{ $t(`reg_codes.status_${RegCodeStatus[row.status].toLowerCase()}`) }}</span>
+            <!-- //i18n-key: reg_codes.status_binded -->
+            <el-tag :type="statusTagType(row.status)" effect="light">{{ $t(`reg_codes.status_${RegCodeStatus[row.status].toLowerCase()}`) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="device_id" :label="$t('reg_codes.device_id')" min-width="180" />
@@ -69,6 +67,7 @@
         </el-table-column>
         <el-table-column :label="$t('common.actions')" width="120" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" @click="markUsed(row)">{{ $t('reg_codes.mark_used') }}</el-button>
             <el-button size="small" type="danger" @click="del(row.id)">{{ $t('common.delete') }}</el-button>
           </template>
         </el-table-column>
@@ -110,7 +109,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { fetchRegCodes, deleteRegCode, batchCreateRegCodes } from '@/apis/reg_codes'
+import { fetchRegCodes, deleteRegCode, batchCreateRegCodes, updateRegCodeStatus } from '@/apis/reg_codes'
 import { fetchApps } from '@/apis/apps'
 import type { RegCodeModel, ListRegCodesParams, BatchCreateRegCodesReq } from '@/types/reg_codes'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -118,6 +117,21 @@ import { useI18n } from 'vue-i18n'
 import { RegCodeStatus, RegCodeType } from '@/types/reg_codes'
 import { formatTime } from '@/utils'
 const { t } = useI18n()
+
+const statusOptions = (Object.values(RegCodeStatus).filter(v => typeof v === 'number') as number[]).map(v => {
+  const status = v as RegCodeStatus
+  return {
+    value: status,
+    label: t(`reg_codes.status_${RegCodeStatus[status].toLowerCase()}`),
+  }
+})
+
+function statusTagType(status: RegCodeStatus) {
+  if (status === RegCodeStatus.Unused) return 'info'
+  if (status === RegCodeStatus.Used) return 'success'
+  if (status === RegCodeStatus.binded) return 'warning'
+  return 'info'
+}
 
 const rows = ref<RegCodeModel[]>([])
 const appOptions = ref<{ id: number, name: string }[]>([])
@@ -133,7 +147,7 @@ async function reload() {
   rows.value = data.list
   total.value = data.total
 }
-function resetFilters() { query.code = ''; query.app_id = undefined; query.code_type = RegCodeType.Time; page.value = 1; reload() }
+function resetFilters() { query.code = ''; query.app_id = undefined; query.code_type = RegCodeType.Time; query.status = undefined; page.value = 1; reload() }
 function onSelChange(arr: RegCodeModel[]) { selectedIds.value = arr.map(it => it.id) }
 function handlePageChange(p: number) { page.value = p; reload() }
 function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reload() }
@@ -144,6 +158,17 @@ async function del(id: number) {
   ElMessage.success(t('common.deleted'))
   reload()
 }
+
+async function markUsed(row: RegCodeModel) {
+  if (row.status === RegCodeStatus.binded) {
+    ElMessage.warning(t('reg_codes.status_locked'))
+    return
+  }
+  await ElMessageBox.confirm(t('reg_codes.mark_used_confirm'), t('common.confirm'), { type: 'warning' })
+  await updateRegCodeStatus(row.id, RegCodeStatus.Used)
+  ElMessage.success(t('common.saved'))
+  reload()
+}
 async function batchDelete() {
   await ElMessageBox.confirm(t('reg_codes.delete_selected_codes_confirm'), t('common.confirm'), { type: 'warning' })
   for (const id of selectedIds.value) { await deleteRegCode(id) }
@@ -151,9 +176,9 @@ async function batchDelete() {
   reload()
 }
 function exportCsv() {
-  const headers = ['id', 'code', 'app_id', 'app_name', 'code_type', 'valid_days', 'total_count', 'use_count', 'status', 'created_at']
+  const headers = ['id', 'code', 'app_id', 'app_name', 'code_type', 'valid_days', 'total_count', 'status', 'created_at']
   const lines = rows.value.map(r => [
-    r.id, r.code, r.app_id, (r.app_name || ''), r.code_type, r.valid_days, (r.total_count ?? ''), r.use_count, r.status, r.created_at
+    r.id, r.code, r.app_id, (r.app_name || ''), r.code_type, r.valid_days, (r.total_count ?? ''), r.status, r.created_at
   ].join(','))
   const csv = [headers.join(','), ...lines].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
