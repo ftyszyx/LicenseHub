@@ -33,7 +33,25 @@ CREATE TABLE permissions (
     CONSTRAINT "action_check" CHECK (action IN ('READ', 'CREATE', 'UPDATE', 'DELETE','*'))
 );
 
-INSERT INTO "permissions" ( "name", "resource", "action", "description") VALUES ( 'all', '*', '*', '所有资源');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (1, 'all', '*', '*', '所有资源');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (2, 'users:read', 'users', 'READ', '用户-读取');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (3, 'users:create', 'users', 'CREATE', '用户-创建');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (4, 'users:update', 'users', 'UPDATE', '用户-更新');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (5, 'users:delete', 'users', 'DELETE', '用户-删除');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (6, 'roles:read', 'roles', 'READ', '角色-读取');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (7, 'roles:create', 'roles', 'CREATE', '角色-创建');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (8, 'roles:update', 'roles', 'UPDATE', '角色-更新');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (9, 'roles:delete', 'roles', 'DELETE', '角色-删除');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (10, 'apps:read', 'apps', 'READ', '应用-读取');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (11, 'apps:create', 'apps', 'CREATE', '应用-创建');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (12, 'apps:update', 'apps', 'UPDATE', '应用-更新');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (13, 'apps:delete', 'apps', 'DELETE', '应用-删除');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (14, 'reg_codes:read', 'reg_codes', 'READ', '注册码-读取');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (15, 'reg_codes:create', 'reg_codes', 'CREATE', '注册码-创建');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (16, 'reg_codes:update', 'reg_codes', 'UPDATE', '注册码-更新');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (17, 'reg_codes:delete', 'reg_codes', 'DELETE', '注册码-删除');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (18, 'devices:read', 'devices', 'READ', '设备-读取');
+INSERT INTO "permissions" ("id", "name", "resource", "action", "description") VALUES (19, 'me:update', 'me', 'UPDATE', '修改自己的密码');
 -- User_Roles Join Table
 CREATE TABLE user_roles (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -51,6 +69,9 @@ CREATE TABLE role_permissions (
 );
 
 INSERT INTO "role_permissions" ( "role_id", "permission_id") VALUES ( 1, 1);
+INSERT INTO "role_permissions" ( "role_id", "permission_id") VALUES ( 2, 10);
+INSERT INTO "role_permissions" ( "role_id", "permission_id") VALUES ( 2, 14);
+INSERT INTO "role_permissions" ( "role_id", "permission_id") VALUES ( 2, 19);
 
 -- 产品表
 CREATE TABLE "apps" (

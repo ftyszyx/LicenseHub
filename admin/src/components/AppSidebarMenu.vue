@@ -19,6 +19,8 @@ const menuItems: AdminMenuItem[] = [
   { label: 'menu.users', icon: 'User', path: RoutePath.AdminUsers },
   //i18n-key: menu.roles
   { label: 'menu.roles', icon: 'UserFilled', path: RoutePath.AdminRoles },
+  //i18n-key: menu.permissions
+  { label: 'menu.permissions', icon: 'Lock', path: RoutePath.AdminPermissions },
   //i18n-key: menu.apps
   { label: 'menu.apps', icon: 'Cpu', path: RoutePath.AdminApps },
   //i18n-key: menu.devices

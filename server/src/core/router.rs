@@ -1,5 +1,6 @@
 use crate::apis::{self, *};
 use crate::core::app::AppState;
+use crate::core::rbac::RequirePerm;
 use salvo::cors::{AllowHeaders, AllowOrigin, Cors};
 use salvo::http::Method;
 use salvo::prelude::*;
@@ -11,34 +12,137 @@ pub fn create_router(app_state: AppState) -> Service {
         .hoop(auth_middleware::auth)
         .hoop(auth_middleware::error_handler)
         .push(Router::with_path("me").get(apis::auth::get_current_user))
+        .push(Router::with_path("me/permissions").get(apis::auth::get_my_permissions))
+        //permissions
+        .push(
+            Router::with_path("permissions/list")
+                .hoop(RequirePerm::new("roles", "READ"))
+                .get(apis::permission_handler::list_permissions),
+        )
+        .push(
+            Router::with_path("roles/{role_id}/permissions")
+                .hoop(RequirePerm::new("roles", "READ"))
+                .get(apis::permission_handler::get_role_permissions),
+        )
+        .push(
+            Router::with_path("roles/{role_id}/permissions")
+                .hoop(RequirePerm::new("roles", "UPDATE"))
+                .post(apis::permission_handler::set_role_permissions),
+        )
         //users
-        .push(Router::with_path("me/password").post(apis::auth::change_password))
-        .push(Router::with_path("users").post(apis::user_handler::add))
-        .push(Router::with_path("users/list").get(apis::user_handler::get_list))
-        .push(Router::with_path("users/{id}").get(apis::user_handler::get_by_id))
-        .push(Router::with_path("users/{id}").put(apis::user_handler::update))
-        .push(Router::with_path("users/{id}").delete(apis::user_handler::delete))
+        .push(
+            Router::with_path("me/password")
+                .hoop(RequirePerm::new("me", "UPDATE"))
+                .post(apis::auth::change_password),
+        )
+        .push(
+            Router::with_path("users")
+                .hoop(RequirePerm::new("users", "CREATE"))
+                .post(apis::user_handler::add),
+        )
+        .push(
+            Router::with_path("users/list")
+                .hoop(RequirePerm::new("users", "READ"))
+                .get(apis::user_handler::get_list),
+        )
+        .push(
+            Router::with_path("users/{id}")
+                .hoop(RequirePerm::new("users", "READ"))
+                .get(apis::user_handler::get_by_id),
+        )
+        .push(
+            Router::with_path("users/{id}")
+                .hoop(RequirePerm::new("users", "UPDATE"))
+                .put(apis::user_handler::update),
+        )
+        .push(
+            Router::with_path("users/{id}")
+                .hoop(RequirePerm::new("users", "DELETE"))
+                .delete(apis::user_handler::delete),
+        )
         //apps
-        .push(Router::with_path("apps").post(apis::app_handler::add))
-        .push(Router::with_path("apps/list").get(apis::app_handler::get_list))
-        .push(Router::with_path("apps/{id}").get(apis::app_handler::get_by_id))
-        .push(Router::with_path("apps/{id}").put(apis::app_handler::update))
-        .push(Router::with_path("apps/{id}").delete(apis::app_handler::delete))
+        .push(
+            Router::with_path("apps")
+                .hoop(RequirePerm::new("apps", "CREATE"))
+                .post(apis::app_handler::add),
+        )
+        .push(
+            Router::with_path("apps/list")
+                .hoop(RequirePerm::new("apps", "READ"))
+                .get(apis::app_handler::get_list),
+        )
+        .push(
+            Router::with_path("apps/{id}")
+                .hoop(RequirePerm::new("apps", "READ"))
+                .get(apis::app_handler::get_by_id),
+        )
+        .push(
+            Router::with_path("apps/{id}")
+                .hoop(RequirePerm::new("apps", "UPDATE"))
+                .put(apis::app_handler::update),
+        )
+        .push(
+            Router::with_path("apps/{id}") .hoop(RequirePerm::new("apps", "DELETE")) .delete(apis::app_handler::delete),
+        )
         //roles
-        .push(Router::with_path("roles").post(apis::role_handler::add))
-        .push(Router::with_path("roles/list").get(apis::role_handler::get_list))
-        .push(Router::with_path("roles/{id}").get(apis::role_handler::get_by_id))
-        .push(Router::with_path("roles/{id}").put(apis::role_handler::update))
-        .push(Router::with_path("roles/{id}").delete(apis::role_handler::delete))
+        .push(
+            Router::with_path("roles")
+                .hoop(RequirePerm::new("roles", "CREATE"))
+                .post(apis::role_handler::add),
+        )
+        .push(
+            Router::with_path("roles/list")
+                .hoop(RequirePerm::new("roles", "READ"))
+                .get(apis::role_handler::get_list),
+        )
+        .push(
+            Router::with_path("roles/{id}")
+                .hoop(RequirePerm::new("roles", "READ"))
+                .get(apis::role_handler::get_by_id),
+        )
+        .push(
+            Router::with_path("roles/{id}")
+                .hoop(RequirePerm::new("roles", "UPDATE"))
+                .put(apis::role_handler::update),
+        )
+        .push(
+            Router::with_path("roles/{id}")
+                .hoop(RequirePerm::new("roles", "DELETE"))
+                .delete(apis::role_handler::delete),
+        )
         //products
         //reg_codes
-        .push(Router::with_path("reg_codes").post(apis::reg_codes_handler::add))
-        .push(Router::with_path("reg_codes/list").get(apis::reg_codes_handler::get_list))
-        .push(Router::with_path("reg_codes/{id}").get(apis::reg_codes_handler::get_by_id))
-        .push(Router::with_path("reg_codes/{id}").put(apis::reg_codes_handler::update))
-        .push(Router::with_path("reg_codes/{id}").delete(apis::reg_codes_handler::delete))
+        .push(
+            Router::with_path("reg_codes")
+                .hoop(RequirePerm::new("reg_codes", "CREATE"))
+                .post(apis::reg_codes_handler::add),
+        )
+        .push(
+            Router::with_path("reg_codes/list")
+                .hoop(RequirePerm::new("reg_codes", "READ"))
+                .get(apis::reg_codes_handler::get_list),
+        )
+        .push(
+            Router::with_path("reg_codes/{id}")
+                .hoop(RequirePerm::new("reg_codes", "READ"))
+                .get(apis::reg_codes_handler::get_by_id),
+        )
+        .push(
+            Router::with_path("reg_codes/{id}")
+                .hoop(RequirePerm::new("reg_codes", "UPDATE"))
+                .put(apis::reg_codes_handler::update),
+        )
+        .push(
+            Router::with_path("reg_codes/{id}")
+                .hoop(RequirePerm::new("reg_codes", "DELETE"))
+                .delete(apis::reg_codes_handler::delete),
+        )
         //devices
-        .push(Router::with_path("devices/list").get(apis::device_handler::get_list));
+        .push(
+            Router::with_path("devices/list")
+                .hoop(RequirePerm::new("devices", "READ"))
+                .get(apis::device_handler::get_list),
+        );
 
     let cors = Cors::new()
         .allow_origin(AllowOrigin::any())

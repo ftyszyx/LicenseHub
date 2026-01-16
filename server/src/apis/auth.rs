@@ -2,6 +2,7 @@ use crate::apis::auth_middleware::Claims;
 use crate::core::app::AppState;
 use crate::core::constants;
 use crate::core::my_error::AppError;
+use crate::core::rbac::list_permission_keys_for_roles;
 use crate::core::response::ApiResponse;
 use crate::utils::jwt::create_jwt;
 use bcrypt::verify;
@@ -116,6 +117,14 @@ pub async fn get_current_user(depot: &mut Depot) -> Result<ApiResponse<users::Mo
         .await?;
     let user = user.ok_or_else(|| AppError::not_found("user", Some(claims.user_id)))?;
     Ok(ApiResponse::success(user))
+}
+
+#[handler]
+pub async fn get_my_permissions(depot: &mut Depot) -> Result<ApiResponse<Vec<String>>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let claims = depot.obtain::<Claims>().unwrap();
+    let perms = list_permission_keys_for_roles(&state, &claims.role_ids).await?;
+    Ok(ApiResponse::success(perms))
 }
 
 #[handler]

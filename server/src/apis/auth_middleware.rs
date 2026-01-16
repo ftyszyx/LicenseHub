@@ -51,5 +51,4 @@ pub async fn error_handler(
             tracing::error!("Response status: {}", code);
         }
     }
-    ctrl.call_next(req, depot, res).await;
 }
