@@ -15,7 +15,43 @@ static DB_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static LOG_ONCE: Once = Once::new();
 // static LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
 
-pub async fn create_test_app() -> Service {
+pub struct TestContext {
+    pub app: Service,
+    #[allow(dead_code)]
+    pub token: String,
+    #[allow(dead_code)]
+    pub app_state: app::AppState,
+}
+
+#[allow(dead_code)]
+pub fn db_url_from_env() -> String {
+    let user = env::var("DATABASE_USER").unwrap();
+    let password = env::var("DATABASE_PASSWORD").unwrap();
+    let host = env::var("DATABASE_HOST").unwrap();
+    let port = env::var("DATABASE_PORT").unwrap();
+    let name = env::var("DATABASE_NAME").unwrap();
+    format!(
+        "postgres://{}:{}@{}:{}/{}",
+        user, password, host, port, name
+    )
+}
+
+#[allow(dead_code)]
+impl TestContext {
+    pub async fn new() -> Self {
+        create_test_context().await
+    }
+
+    pub async fn login_default_user(&mut self) {
+        self.token = create_test_user_and_login(&self.app).await;
+    }
+
+    pub fn bearer_token(&self) -> String {
+        bearer(&self.token)
+    }
+}
+
+pub async fn create_test_context() -> TestContext {
     dotenvy::from_filename(".env.test").unwrap();
     LOG_ONCE.call_once(|| {
         let _ = app::init_log();
@@ -31,8 +67,17 @@ pub async fn create_test_app() -> Service {
     println!("init database");
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     println!("init database success");
-    let app = router::create_router(app_state);
-    app
+    let app = router::create_router(app_state.clone());
+    TestContext {
+        app,
+        token: String::new(),
+        app_state: app_state,
+    }
+}
+
+#[allow(dead_code)]
+pub async fn create_test_app() -> Service {
+    create_test_context().await.app
 }
 
 #[allow(dead_code)]

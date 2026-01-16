@@ -8,8 +8,8 @@ mod helpers;
 #[tokio::test]
 async fn test_validate_reg_code_post_and_get() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let app_key = format!("KEY_{}", chrono::Utc::now().timestamp());
     let create_app_body = json!({
         "name": format!("VA-App-{}", chrono::Utc::now().timestamp()),
@@ -25,10 +25,10 @@ async fn test_validate_reg_code_post_and_get() {
         "status": 1
     });
     let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "create_app_for_validate").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
@@ -42,22 +42,22 @@ async fn test_validate_reg_code_post_and_get() {
         "code_type": 0
     });
     let _ = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_rc)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"code":code, "app_key":app_key, "device_id":"dev-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     assert_eq!(resp.status_code, Some(StatusCode::OK));
     let resp = TestClient::get(helpers::get_url(&format!(
         "/api/reg/validate?code={}&app_key={}&device_id=dev-1",
         code, app_key
     )))
-    .send(&app)
+    .send(&ctx.app)
     .await;
     assert_eq!(resp.status_code, Some(StatusCode::OK));
     print_response_body_get_json(resp, "validate_reg_code_post_and_get").await;
@@ -66,8 +66,8 @@ async fn test_validate_reg_code_post_and_get() {
 #[tokio::test]
 async fn test_validate_device_without_code() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     // create app with trial_days
     let app_key = format!("KEY_{}", chrono::Utc::now().timestamp());
     let create_app_body = json!({
@@ -84,10 +84,10 @@ async fn test_validate_device_without_code() {
         "status": 1
     });
     let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let _ = print_response_body_get_json(resp, "create_app_for_device_only").await;
 
@@ -95,7 +95,7 @@ async fn test_validate_device_without_code() {
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"app_key":app_key, "device_id":"dev-only-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     assert_eq!(resp.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(resp, "validate_device_only").await;
@@ -107,7 +107,7 @@ async fn test_validate_device_without_code() {
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"app_key":app_key, "device_id":"dev-only-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     assert_eq!(resp.status_code, Some(StatusCode::OK));
 }
@@ -115,26 +115,27 @@ async fn test_validate_device_without_code() {
 #[tokio::test]
 async fn test_get_reg_codes_list() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let response = TestClient::get(helpers::get_url(
         "/api/admin/reg_codes/list?page=1&page_size=10",
     ))
-    .add_header("authorization", format!("Bearer {}", token), true)
-    .send(&app)
+    .add_header("authorization", format!("Bearer {}", ctx.token), true)
+    .send(&ctx.app)
     .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(response, "get_reg_codes_list").await;
     assert!(json["success"].as_bool().unwrap());
     assert!(json["data"]["list"].is_array());
     assert!(json["data"]["total"].is_number());
+    assert!(json["data"]["page"].is_number());
 }
 
 #[tokio::test]
 async fn test_create_reg_code() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let create_app_body = json!({
         "name": format!("TestApp_{}", chrono::Utc::now().timestamp()),
         "app_id": format!("com.test.regcode_{}", chrono::Utc::now().timestamp()),
@@ -147,10 +148,10 @@ async fn test_create_reg_code() {
         "status": 1
     });
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(response, "create_app_response").await;
@@ -168,10 +169,10 @@ async fn test_create_reg_code() {
         "status": 0
     });
     let response = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_reg_code_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(response, "create_reg_code_response").await;
@@ -186,8 +187,8 @@ async fn test_create_reg_code() {
 #[tokio::test]
 async fn test_update_reg_code() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let create_app_body = json!({
         "name": format!("TestApp_{}", chrono::Utc::now().timestamp()),
         "app_id": format!("com.test.update_{}", chrono::Utc::now().timestamp()),
@@ -199,10 +200,10 @@ async fn test_update_reg_code() {
         "status": 1
     });
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_app_for_update").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
@@ -215,10 +216,10 @@ async fn test_update_reg_code() {
         "code_type": 0
     });
     let response = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_reg_code_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_reg_code_for_update").await;
     let reg_code_id = json["data"]["id"].as_i64().unwrap();
@@ -232,10 +233,10 @@ async fn test_update_reg_code() {
         "/api/admin/reg_codes/{}",
         reg_code_id
     )))
-    .add_header("authorization", format!("Bearer {}", token), true)
+    .add_header("authorization", format!("Bearer {}", ctx.token), true)
     .add_header("content-type", "application/json", true)
     .json(&update_reg_code_body)
-    .send(&app)
+    .send(&ctx.app)
     .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(response, "update_reg_code_response").await;
@@ -248,8 +249,8 @@ async fn test_update_reg_code() {
 #[tokio::test]
 async fn test_get_reg_code_by_id() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let create_app_body = json!({
         "name": format!("TestApp_{}", chrono::Utc::now().timestamp()),
         "app_id": format!("com.test.getbyid_{}", chrono::Utc::now().timestamp()),
@@ -261,10 +262,10 @@ async fn test_get_reg_code_by_id() {
         "status": 1
     });
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_app_for_get_by_id").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
@@ -278,10 +279,10 @@ async fn test_get_reg_code_by_id() {
         "code_type": 0
     });
     let response = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_reg_code_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_reg_code_for_get_by_id").await;
     let reg_code_id = json["data"]["id"].as_i64().unwrap();
@@ -289,8 +290,8 @@ async fn test_get_reg_code_by_id() {
         "/api/admin/reg_codes/{}",
         reg_code_id
     )))
-    .add_header("authorization", format!("Bearer {}", token), true)
-    .send(&app)
+    .add_header("authorization", format!("Bearer {}", ctx.token), true)
+    .send(&ctx.app)
     .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(response, "get_reg_code_by_id_response").await;
@@ -306,8 +307,8 @@ async fn test_get_reg_code_by_id() {
 #[tokio::test]
 async fn test_delete_reg_code() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let create_app_body = json!({
         "name": format!("TestApp_{}", chrono::Utc::now().timestamp()),
         "app_id": format!("com.test.delete_{}", chrono::Utc::now().timestamp()),
@@ -319,10 +320,10 @@ async fn test_delete_reg_code() {
         "status": 1
     });
     let response = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_app_for_delete").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
@@ -335,10 +336,10 @@ async fn test_delete_reg_code() {
         "code_type": 0
     });
     let response = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_reg_code_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_reg_code_for_delete").await;
     let reg_code_id = json["data"]["id"].as_i64().unwrap();
@@ -346,8 +347,8 @@ async fn test_delete_reg_code() {
         "/api/admin/reg_codes/{}",
         reg_code_id
     )))
-    .add_header("authorization", format!("Bearer {}", token), true)
-    .send(&app)
+    .add_header("authorization", format!("Bearer {}", ctx.token), true)
+    .send(&ctx.app)
     .await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = print_response_body_get_json(response, "delete_reg_code_response").await;
@@ -356,8 +357,8 @@ async fn test_delete_reg_code() {
         "/api/admin/reg_codes/{}",
         reg_code_id
     )))
-    .add_header("authorization", format!("Bearer {}", token), true)
-    .send(&app)
+    .add_header("authorization", format!("Bearer {}", ctx.token), true)
+    .send(&ctx.app)
     .await;
     let json = print_response_body_get_json(response, "delete_reg_code_response").await;
     assert_eq!(
@@ -369,8 +370,8 @@ async fn test_delete_reg_code() {
 #[tokio::test]
 async fn test_reg_codes_pagination() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let test_cases = vec![
         helpers::get_url("/api/admin/reg_codes/list?page=1&page_size=5"),
         helpers::get_url("/api/admin/reg_codes/list?page=1&page_size=20"),
@@ -378,8 +379,8 @@ async fn test_reg_codes_pagination() {
     ];
     for url in test_cases {
         let response = TestClient::get(url)
-            .add_header("authorization", format!("Bearer {}", token), true)
-            .send(&app)
+            .add_header("authorization", format!("Bearer {}", ctx.token), true)
+            .send(&ctx.app)
             .await;
         assert_eq!(response.status_code, Some(StatusCode::OK));
         let json = print_response_body_get_json(response, "reg_codes_pagination").await;
@@ -393,8 +394,8 @@ async fn test_reg_codes_pagination() {
 #[tokio::test]
 async fn test_reg_codes_search_filters() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let test_cases = vec![
         helpers::get_url("/api/admin/reg_codes/list?status=0"),
         helpers::get_url("/api/admin/reg_codes/list?status=1"),
@@ -403,8 +404,8 @@ async fn test_reg_codes_search_filters() {
     ];
     for url in test_cases {
         let response = TestClient::get(url)
-            .add_header("authorization", format!("Bearer {}", token), true)
-            .send(&app)
+            .add_header("authorization", format!("Bearer {}", ctx.token), true)
+            .send(&ctx.app)
             .await;
         assert_eq!(response.status_code, Some(StatusCode::OK));
         let json = print_response_body_get_json(response, "reg_codes_filters").await;
@@ -416,8 +417,8 @@ async fn test_reg_codes_search_filters() {
 #[tokio::test]
 async fn test_reg_code_validation_errors() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
     let invalid_reg_code_body = json!({
         "code": "",
         "app_id": -1,
@@ -426,10 +427,10 @@ async fn test_reg_code_validation_errors() {
         "status": 99
     });
     let response = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&invalid_reg_code_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(response, "create_reg_code_response").await;
     assert_eq!(json["success"].as_bool().unwrap(), false);
@@ -438,8 +439,8 @@ async fn test_reg_code_validation_errors() {
 #[tokio::test]
 async fn test_time_reg_code_activation_and_revalidate() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
 
     let app_key = helpers::unique_name("KEY");
     let create_app_body = json!({
@@ -456,10 +457,10 @@ async fn test_time_reg_code_activation_and_revalidate() {
         "status": 1
     });
     let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "create_app_time_activation").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
@@ -474,16 +475,16 @@ async fn test_time_reg_code_activation_and_revalidate() {
         "code_type": 0
     });
     let _ = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_rc)
-        .send(&app)
+        .send(&ctx.app)
         .await;
 
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"code":code, "app_key":app_key, "device_id":"dev-time-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "validate_time_first").await;
     assert!(json["success"].as_bool().unwrap());
@@ -493,7 +494,7 @@ async fn test_time_reg_code_activation_and_revalidate() {
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"code":code, "app_key":app_key, "device_id":"dev-time-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "validate_time_second").await;
     assert!(json["success"].as_bool().unwrap());
@@ -504,8 +505,8 @@ async fn test_time_reg_code_activation_and_revalidate() {
 #[tokio::test]
 async fn test_count_reg_code_activation_and_exhaust() {
     let _lock = helpers::db_lock().await;
-    let app = helpers::create_test_app().await;
-    let token = helpers::create_test_user_and_login(&app).await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
 
     let app_key = helpers::unique_name("KEY");
     let create_app_body = json!({
@@ -522,16 +523,18 @@ async fn test_count_reg_code_activation_and_exhaust() {
         "status": 1
     });
     let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_app_body)
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "create_app_count_activation").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
 
     dotenvy::from_filename(".env.test").unwrap();
-    let pool = sqlx::PgPool::connect(&db_url_from_env()).await.unwrap();
+    let pool = sqlx::PgPool::connect(&helpers::db_url_from_env())
+        .await
+        .unwrap();
     sqlx::query("update apps set code_type = 1 where id = $1")
         .bind(app_id)
         .execute(&pool)
@@ -549,16 +552,16 @@ async fn test_count_reg_code_activation_and_exhaust() {
         "total_count": 1
     });
     let _ = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
-        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("authorization", format!("Bearer {}", ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&create_rc)
-        .send(&app)
+        .send(&ctx.app)
         .await;
 
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"code":code, "app_key":app_key, "device_id":"dev-count-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "validate_count_first").await;
     assert!(json["success"].as_bool().unwrap());
@@ -568,7 +571,7 @@ async fn test_count_reg_code_activation_and_exhaust() {
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"code":code, "app_key":app_key, "device_id":"dev-count-1"}))
-        .send(&app)
+        .send(&ctx.app)
         .await;
     let json = print_response_body_get_json(resp, "validate_count_second").await;
     assert!(!json["success"].as_bool().unwrap());
