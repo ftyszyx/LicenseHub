@@ -1,0 +1,16 @@
+name: licensehub 
+services:
+  server:
+    image: ftyszyx752/licensehub:latest
+    env_file:
+      - .env
+    ports:
+      - "${LISTEN_OUT_PORT}:${LISTEN_PORT}"
+    volumes:
+      - ./deploy/server/logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - 1panel-network
+networks:
+  1panel-network:
+    external: true
