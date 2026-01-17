@@ -46,7 +46,10 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./server
-          file: ./server/Dockerfile.release
+          file: ./server/Dockerfile
+          build-args: |
+            USE_ALIYUN_DEBIAN_MIRROR=0
+            USE_ALIYUN_CRATES_MIRROR=0
           push: true
           tags: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERNAME }}:${{ inputs.tag }}
 
@@ -56,7 +59,10 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./server
-          file: ./server/Dockerfile.release
+          file: ./server/Dockerfile
+          build-args: |
+            USE_ALIYUN_DEBIAN_MIRROR=0
+            USE_ALIYUN_CRATES_MIRROR=0
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
