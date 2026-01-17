@@ -8,6 +8,11 @@ use salvo::prelude::*;
 use salvo_oapi::security::{Http, HttpAuthScheme};
 use salvo_oapi::{OpenApi, SecurityScheme};
 
+#[handler]
+async fn health_check(res: &mut Response) {
+    res.render("hello world");
+}
+
 pub fn create_router(app_state: AppState) -> Service {
     let admin_routes = Router::with_path("/api/admin")
         .hoop(auth_middleware::auth)
@@ -166,6 +171,7 @@ pub fn create_router(app_state: AppState) -> Service {
     let mut router = Router::new()
         .hoop(affix_state::inject(app_state))
         .push(Router::with_path("/api/login").post(apis::auth::login))
+        .get(health_check)
         .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
         .push(
             Router::with_path("/api/reg/validate").get(apis::reg_codes_handler::validate_code_get),

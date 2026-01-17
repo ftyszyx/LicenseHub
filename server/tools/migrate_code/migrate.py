@@ -105,7 +105,11 @@ def _insert_apps(cur, apps: Sequence[Dict[str, Any]]) -> int:
     return len(values)
 
 
-def _insert_app_devices(cur, devices: Sequence[Dict[str, Any]]) -> int:
+def _insert_app_devices(
+    cur,
+    devices: Sequence[Dict[str, Any]],
+    reg_code_max_expire_by_device_id: Dict[int, datetime],
+) -> int:
     if not devices:
         return 0
     cols = (
@@ -121,13 +125,16 @@ def _insert_app_devices(cur, devices: Sequence[Dict[str, Any]]) -> int:
     values = []
     for d in devices:
         created_at = d.get("bind_time") or _utcnow()
+        max_expire_time = reg_code_max_expire_by_device_id.get(d["id"])
+        if max_expire_time is None:
+            max_expire_time = d.get("expire_time")
         values.append(
             (
                 d["id"],
                 d["app_id"],
                 d["device_id"],
                 d.get("device_info"),
-                d.get("expire_time"),
+                max_expire_time,
                 None,
                 created_at,
                 created_at,
@@ -206,11 +213,16 @@ def _insert_reg_codes(cur, codes: Sequence[Dict[str, Any]], skip_expired: bool) 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser()
+    # 源数据库
     parser.add_argument("--source-dsn", default=os.getenv("SOURCE_DSN"))
+    # 目标数据库
     parser.add_argument("--target-dsn", default=os.getenv("TARGET_DSN"))
-    parser.add_argument("--truncate-target", action="store_true")
-    parser.add_argument("--skip-expired", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    # 是否清空目标数据库
+    parser.add_argument("--truncate-target", action="store_true", default=True)
+    # 是否跳过过期的注册码
+    parser.add_argument("--skip-expired", action="store_true", default=False)
+    # 是否只打印数量
+    parser.add_argument("--dry-run", action="store_true", default=False)
     args = parser.parse_args(argv)
 
     if not args.source_dsn or not args.target_dsn:
@@ -227,6 +239,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             devices = _fetch_all(src_cur, 'SELECT * FROM "app_devices" ORDER BY id ASC')
             codes = _fetch_all(src_cur, 'SELECT * FROM "reg_codes" ORDER BY id ASC')
 
+            reg_code_max_expire_by_device_id: Dict[int, datetime] = {}
+            for c in codes:
+                if args.skip_expired and int(c.get("status", 0)) == 2:
+                    continue
+                device_id = c.get("device_id")
+                expire_time = c.get("expire_time")
+                if device_id is None or expire_time is None:
+                    continue
+                if device_id not in reg_code_max_expire_by_device_id or expire_time > reg_code_max_expire_by_device_id[device_id]:
+                    reg_code_max_expire_by_device_id[device_id] = expire_time
+
             if args.dry_run:
                 print(f"apps: {len(apps)}")
                 print(f"app_devices: {len(devices)}")
@@ -234,11 +257,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return 0
 
             try:
-                if args.truncate_target:
+                truncate_target = args.truncate_target
+                print(f"truncate_target: {truncate_target}")
+                if truncate_target:
                     _truncate_target(dst_cur)
 
                 inserted_apps = _insert_apps(dst_cur, apps)
-                inserted_devices = _insert_app_devices(dst_cur, devices)
+                inserted_devices = _insert_app_devices(dst_cur, devices, reg_code_max_expire_by_device_id)
                 inserted_codes = _insert_reg_codes(dst_cur, codes, skip_expired=args.skip_expired)
 
                 _set_sequence(dst_cur, "apps")
