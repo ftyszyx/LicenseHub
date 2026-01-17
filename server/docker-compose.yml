@@ -1,12 +1,12 @@
 name: licensehub 
 services:
   server:
-    build:
-      context: ../server
-      dockerfile: Dockerfile
-      args:
-        USE_ALIYUN_DEBIAN_MIRROR: 1
-        USE_ALIYUN_CRATES_MIRROR: 1
+    # build:
+    #   context: ../server
+    #   dockerfile: Dockerfile
+    #   args:
+    #     USE_ALIYUN_DEBIAN_MIRROR: 1
+    #     USE_ALIYUN_CRATES_MIRROR: 1
     image: ftyszyx752/licensehub:latest
     env_file:
       - .env
@@ -16,7 +16,7 @@ services:
     #   redis:
     #     condition: service_started 
     ports:
-      - "21600:3000"
+      - "${LISTEN_OUT_PORT}:${LISTEN_PORT}"
     volumes:
       - ./deploy/server/logs:/app/logs
     restart: unless-stopped
