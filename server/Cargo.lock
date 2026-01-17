@@ -128,6 +128,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bcrypt",
+ "bytes",
  "chrono",
  "data_model",
  "dotenvy",

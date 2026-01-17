@@ -101,6 +101,7 @@
     "mark_used": "Mark Used",
     "mark_used_confirm": "Mark this code as used?",
     "status_locked": "Binded reg code status cannot be changed",
+    "delete_locked": "Only unused reg codes can be deleted",
     "device_id": ""
   },
   "products": {

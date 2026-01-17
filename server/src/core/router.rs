@@ -1,6 +1,7 @@
 use crate::apis::{self, *};
 use crate::core::app::AppState;
 use crate::core::rbac::RequirePerm;
+use crate::apis::log_middleware;
 use salvo::cors::{AllowHeaders, AllowOrigin, Cors};
 use salvo::http::Method;
 use salvo::prelude::*;
@@ -183,6 +184,9 @@ pub fn create_router(app_state: AppState) -> Service {
     let router = router
         .unshift(doc.into_router("/api-doc/openapi.json"))
         .unshift(SwaggerUi::new("/api-doc/openapi.json").into_router("/swagger-ui"));
-    let service = Service::new(router).hoop(cors).hoop(Logger::new());
+    let service = Service::new(router)
+        .hoop(cors)
+        .hoop(Logger::new())
+        .hoop(log_middleware::log_response_body);
     service
 }

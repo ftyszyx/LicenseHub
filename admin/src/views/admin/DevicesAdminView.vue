@@ -17,7 +17,7 @@
         </el-table-column>
         <el-table-column prop="device_id" :label="$t('devices.device_id')" min-width="200" />
         <el-table-column :label="$t('devices.binding_time')" min-width="180">
-          <template #default="{ row }">{{ formatTime(row.bind_time) }}</template>
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column :label="$t('devices.expire_time')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.expire_time) }}</template>

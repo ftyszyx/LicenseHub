@@ -16,6 +16,8 @@ pub struct DeviceInfo {
     pub device_id: String,
     pub device_info: Option<sea_orm::prelude::Json>,
     pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+    pub updated_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
 impl TryFrom<(app_devices::Model, Option<apps::Model>)> for DeviceInfo {
@@ -29,6 +31,8 @@ impl TryFrom<(app_devices::Model, Option<apps::Model>)> for DeviceInfo {
             device_id: app_device.device_id,
             device_info: app_device.device_info,
             expire_time: app_device.expire_time,
+            created_at: app_device.created_at,
+            updated_at: app_device.updated_at,
         })
     }
 }

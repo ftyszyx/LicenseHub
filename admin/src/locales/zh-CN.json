@@ -183,6 +183,7 @@
     "mark_used": "标记已使用",
     "mark_used_confirm": "确认将此注册码标记为已使用吗？",
     "status_locked": "已绑定的注册码不允许修改状态",
+    "delete_locked": "仅未使用的注册码允许删除",
     "device_id": "设备ID"
   },
   "permissions": {

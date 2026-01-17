@@ -7,6 +7,8 @@ export interface DeviceInfo {
   device_info?: any | null
   bind_time?: string | null
   expire_time?: string | null
+  created_at?: string | null
+  updated_at?: string | null
   remaining?: number | null
 }
 export type ListDevicesParams = {

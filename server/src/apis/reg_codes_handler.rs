@@ -386,6 +386,12 @@ pub async fn delete_impl(state: &AppState, id: i32) -> Result<(), AppError> {
     let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
     let reg_code =
         reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+    if RegCodeStatus::from(reg_code.status) != RegCodeStatus::Unused {
+        return Err(AppError::business_logic(
+            "REG_CODE_DELETE_FORBIDDEN",
+            "only unused reg codes can be deleted",
+        ));
+    }
     reg_code.into_active_model().delete(&state.db).await?;
     Ok(())
 }
@@ -647,7 +653,8 @@ pub async fn time_reg_code_validate(
                 let device_expire = dm.expire_time.unwrap_or(now);
                 let expire_time =
                     device_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
-                let active_device_model = dm.into_active_model();
+                let mut active_device_model = dm.into_active_model();
+                active_device_model.expire_time = Set(Some(expire_time));
                 active_device_model.update(&tx).await?;
                 expire_time
             }

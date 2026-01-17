@@ -46,6 +46,8 @@ sea-orm = { version = "1.1.13", features = [
     "debug-print",
 ] }
 
+bytes = "1"
+
 #其它
 bcrypt = "0.17.0"
 jsonwebtoken = "9.3"

@@ -55,9 +55,6 @@
         </template>
         <el-table-column prop="status" :label="$t('reg_codes.status')" width="100">
           <template #default="{ row }">
-            <!-- //i18n-key: reg_codes.status_unused -->
-            <!-- //i18n-key: reg_codes.status_used -->
-            <!-- //i18n-key: reg_codes.status_binded -->
             <el-tag :type="statusTagType(row.status)" effect="light">{{ $t(`reg_codes.status_${RegCodeStatus[row.status].toLowerCase()}`) }}</el-tag>
           </template>
         </el-table-column>
@@ -65,10 +62,12 @@
         <el-table-column :label="$t('reg_codes.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="120" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="180" fixed="right" align="right">
           <template #default="{ row }">
-            <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" @click="markUsed(row)">{{ $t('reg_codes.mark_used') }}</el-button>
-            <el-button size="small" type="danger" @click="del(row.id)">{{ $t('common.delete') }}</el-button>
+            <div class="flex justify-end gap-2">
+              <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" plain @click="markUsed(row)">{{ $t('reg_codes.mark_used') }}</el-button>
+              <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="danger" plain @click="del(row.id)">{{ $t('common.delete') }}</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -170,6 +169,11 @@ async function markUsed(row: RegCodeModel) {
   reload()
 }
 async function batchDelete() {
+  const hasLocked = rows.value.some(r => selectedIds.value.includes(r.id) && r.status !== RegCodeStatus.Unused)
+  if (hasLocked) {
+    ElMessage.warning(t('reg_codes.delete_locked'))
+    return
+  }
   await ElMessageBox.confirm(t('reg_codes.delete_selected_codes_confirm'), t('common.confirm'), { type: 'warning' })
   for (const id of selectedIds.value) { await deleteRegCode(id) }
   ElMessage.success(t('common.deleted'))
