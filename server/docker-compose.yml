@@ -1,12 +1,13 @@
+name: licensehub 
 services:
   server:
     build:
       context: ../server
       dockerfile: Dockerfile
       args:
-        USE_ALIYUN_DEBIAN_MIRROR: 0
-        USE_ALIYUN_CRATES_MIRROR: 0
-    # image: ftyszyx752/licensehub:latest
+        USE_ALIYUN_DEBIAN_MIRROR: 1
+        USE_ALIYUN_CRATES_MIRROR: 1
+    image: ftyszyx752/licensehub:latest
     env_file:
       - .env
     # depends_on:
