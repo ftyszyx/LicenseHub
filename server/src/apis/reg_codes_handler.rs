@@ -651,6 +651,8 @@ pub async fn time_reg_code_validate(
             Some(dm) => {
                 active_reg_model.device_id = Set(Some(dm.id));
                 let device_expire = dm.expire_time.unwrap_or(now);
+                //check device expire time, if it is less than now, use now as device expire time
+                let device_expire = if device_expire < now { now } else { device_expire };
                 let expire_time =
                     device_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
                 let mut active_device_model = dm.into_active_model();
