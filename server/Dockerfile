@@ -1,13 +1,13 @@
-
-ARG USE_ALIYUN_DEBIAN_MIRROR=1
-ARG USE_ALIYUN_CRATES_MIRROR=1
-ARG APP_NAME=app_server
 # Stage 1: Build
 FROM rust:1.92-slim-bookworm AS builder
+ARG APP_NAME=app_server
+ARG USE_ALIYUN_DEBIAN_MIRROR=1
+ARG USE_ALIYUN_CRATES_MIRROR=1
 ENV CARGO_HOME=/usr/local/cargo
 # Install build dependencies, including postgresql client and nodejs/npm for swagger-ui
 RUN if [ "$USE_ALIYUN_DEBIAN_MIRROR" = "1" ]; then sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; fi
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev nodejs npm curl
+
 WORKDIR /usr/src/app
 RUN if [ "$USE_ALIYUN_CRATES_MIRROR" = "1" ]; then \
     mkdir -p .cargo && \
@@ -25,6 +25,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres
 
 FROM debian:bookworm-slim AS runner
+ARG APP_NAME=app_server
+ARG USE_ALIYUN_DEBIAN_MIRROR=1
 WORKDIR /app
 # Install required runtime libraries for the binary (OpenSSL, certs)
 RUN if [ "$USE_ALIYUN_DEBIAN_MIRROR" = "1" ]; then sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; fi \
