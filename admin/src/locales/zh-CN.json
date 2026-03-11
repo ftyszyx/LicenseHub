@@ -60,7 +60,9 @@
     "reg_codes": "注册码",
     "roles": "角色",
     "devices": "设备",
-    "permissions": "权限"
+    "permissions": "权限",
+    "reg_test": "注册码测试",
+    "use_records": "使用记录"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -212,5 +214,31 @@
     "expire_time": "过期时间",
     "remaining": "剩余次数",
     "apptitle": "应用信息"
+  },
+  "reg_test": {
+    "title": "注册码测试",
+    "subtitle": "注册码绑定和检查测试",
+    "bind_title": "绑定注册码",
+    "check_title": "检查注册码",
+    "bind_submit": "绑定",
+    "check_submit": "检查",
+    "empty_result": "无结果",
+    "bind_success": "绑定成功",
+    "check_success": "检查成功",
+    "usecount_title": "使用次数",
+    "usecount_submit": "使用",
+    "use_count": "使用次数",
+    "use_info": "使用信息(JSON)",
+    "remain_count": "剩余次数",
+    "usecount_success": "使用成功",
+    "invalid_use_info": "使用信息必须是有效的JSON"
+  },
+  "use_records": {
+    "title": "使用记录",
+    "app": "应用",
+    "device_id": "设备ID",
+    "use_count": "使用次数",
+    "use_info": "使用信息",
+    "time": "时间"
   }
 }

@@ -37,8 +37,13 @@ pub async fn init_app() -> Result<AppState, AppError> {
     tracing::info!("Database connected successfully");
     // 初始化 Redis
     let redis_url = format!("redis://{}:{}", config.redis.host, config.redis.port);
-    let redis = RedisCache::new(&redis_url, &config.redis.username, &config.redis.password, &config.redis.key_prefix)
-        .map_err(|e| AppError::Message(format!("redis connection failed:{}", e)))?;
+    let redis = RedisCache::new(
+        &redis_url,
+        &config.redis.username,
+        &config.redis.password,
+        &config.redis.key_prefix,
+    )
+    .map_err(|e| AppError::Message(format!("redis connection failed:{}", e)))?;
     tracing::info!("Redis connected successfully");
     // 创建应用状态
     let app_state = AppState {

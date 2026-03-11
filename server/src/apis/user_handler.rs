@@ -29,7 +29,7 @@ pub struct UserUpdatePayload {
     pub role_ids: Option<Vec<i32>>,
 }
 
-#[derive(Serialize )]
+#[derive(Serialize)]
 pub struct UserWithRoles {
     pub user: users::Model,
     pub role_ids: Vec<i32>,
