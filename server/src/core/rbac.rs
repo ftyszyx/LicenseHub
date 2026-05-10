@@ -38,12 +38,7 @@ pub async fn list_permission_keys_for_roles(
     Ok(list)
 }
 
-fn matches_permission(
-    perm_resource: &str,
-    perm_action: &str,
-    resource: &str,
-    action: &str,
-) -> bool {
+fn matches_permission(perm_resource: &str, perm_action: &str, resource: &str, action: &str) -> bool {
     let action = action.to_ascii_uppercase();
 
     (perm_resource == "*" || perm_resource == resource)

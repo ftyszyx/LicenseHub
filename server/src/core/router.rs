@@ -1,7 +1,7 @@
-use crate::apis::log_middleware;
 use crate::apis::{self, *};
 use crate::core::app::AppState;
 use crate::core::rbac::RequirePerm;
+use crate::apis::log_middleware;
 use salvo::cors::{AllowHeaders, AllowOrigin, Cors};
 use salvo::http::Method;
 use salvo::prelude::*;
@@ -88,9 +88,7 @@ pub fn create_router(app_state: AppState) -> Service {
                 .put(apis::app_handler::update),
         )
         .push(
-            Router::with_path("apps/{id}")
-                .hoop(RequirePerm::new("apps", "DELETE"))
-                .delete(apis::app_handler::delete),
+            Router::with_path("apps/{id}") .hoop(RequirePerm::new("apps", "DELETE")) .delete(apis::app_handler::delete),
         )
         //roles
         .push(
@@ -150,11 +148,6 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("reg_codes", "DELETE"))
                 .delete(apis::reg_codes_handler::delete),
         )
-        .push(
-            Router::with_path("use_records/list")
-                .hoop(RequirePerm::new("use_records", "READ"))
-                .get(apis::use_record_handler::get_list),
-        )
         //devices
         .push(
             Router::with_path("devices/list")
@@ -182,15 +175,6 @@ pub fn create_router(app_state: AppState) -> Service {
         .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
         .push(
             Router::with_path("/api/reg/validate").get(apis::reg_codes_handler::validate_code_get),
-        )
-        .push(Router::with_path("/api/reg/bind").post(apis::reg_codes_handler::bind_code))
-        .push(Router::with_path("/api/reg/bind").get(apis::reg_codes_handler::bind_code_get))
-        .push(Router::with_path("/api/reg/check").post(apis::reg_codes_handler::check_device))
-        .push(Router::with_path("/api/reg/check").get(apis::reg_codes_handler::check_device_get))
-        .push(Router::with_path("/api/reg/usecount").post(apis::reg_codes_handler::use_count))
-        .push(
-            Router::with_path("/api/reg/use_records")
-                .get(apis::use_record_handler::public_get_list),
         )
         .push(admin_routes);
     if register_open {

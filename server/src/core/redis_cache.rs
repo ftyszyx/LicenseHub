@@ -13,12 +13,7 @@ pub struct RedisCache {
 #[allow(dead_code)]
 impl RedisCache {
     /// 创建一个新的 RedisCache 实例
-    pub fn new(
-        redis_url: &str,
-        username: &str,
-        password: &str,
-        key_prefix: &str,
-    ) -> Result<Self, RedisError> {
+    pub fn new(redis_url: &str, username: &str, password: &str, key_prefix: &str) -> Result<Self, RedisError> {
         let url_with_auth = if username.is_empty() && password.is_empty() {
             redis_url.to_string()
         } else {
@@ -39,10 +34,7 @@ impl RedisCache {
         };
 
         let client = Client::open(url_with_auth)?;
-        Ok(Self {
-            client,
-            key_prefix: key_prefix.to_string(),
-        })
+        Ok(Self { client ,key_prefix: key_prefix.to_string()})
     }
 
     async fn get_conn(&self) -> Result<MultiplexedConnection, RedisError> {

@@ -1,16 +1,6 @@
 import request from '@/utils/request'
 import type { ApiResponse, PagingResponse } from '@/types'
-import type {
-  ListRegCodesParams,
-  RegCodeModel,
-  BatchCreateRegCodesReq,
-  RegCodeStatus,
-  BindRegCodeReq,
-  CheckRegDeviceReq,
-  RegCodeBindCheckResp,
-  UseCountReq,
-  UseCountResp,
-} from '@/types/reg_codes'
+import type { ListRegCodesParams, RegCodeModel, BatchCreateRegCodesReq, RegCodeStatus } from '@/types/reg_codes'
 
 export const fetchRegCodes = async (params: ListRegCodesParams = {}) => {
   const response = await request.get('/admin/reg_codes/list', { params }) as ApiResponse<PagingResponse<RegCodeModel>>
@@ -55,31 +45,6 @@ export const batchCreateRegCodes = async (payload: BatchCreateRegCodesReq) => {
     items.push(resp.data)
   }
   return items
-}
-
-export const bindRegCode = async (payload: BindRegCodeReq) => {
-  const response = await request.post('/reg/bind', payload) as ApiResponse<RegCodeBindCheckResp>
-  return response.data
-}
-
-export const bindRegCodeByGet = async (params: BindRegCodeReq) => {
-  const response = await request.get('/reg/bind', { params }) as ApiResponse<RegCodeBindCheckResp>
-  return response.data
-}
-
-export const checkRegDevice = async (payload: CheckRegDeviceReq) => {
-  const response = await request.post('/reg/check', payload) as ApiResponse<RegCodeBindCheckResp>
-  return response.data
-}
-
-export const checkRegDeviceByGet = async (params: CheckRegDeviceReq) => {
-  const response = await request.get('/reg/check', { params }) as ApiResponse<RegCodeBindCheckResp>
-  return response.data
-}
-
-export const useRegCount = async (payload: UseCountReq) => {
-  const response = await request.post('/reg/usecount', payload) as ApiResponse<UseCountResp>
-  return response.data
 }
 
 

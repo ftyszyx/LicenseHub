@@ -1,7 +1,7 @@
-use serde::de;
-use std::fmt::Display;
 use std::str::FromStr;
-pub fn from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+use std::fmt::Display;
+use serde::de;
+pub fn from_str<'de, D,T>(deserializer: D) -> Result<T, D::Error>
 where
     T: FromStr,
     T::Err: Display,
@@ -11,6 +11,7 @@ where
     let s: String = String::deserialize(deserializer)?;
     T::from_str(&s).map_err(de::Error::custom)
 }
+
 
 pub fn from_str_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where

@@ -44,30 +44,3 @@ export interface BatchCreateRegCodesReq {
   total_count?: number | null
 }
 
-export interface BindRegCodeReq {
-  app_key: string
-  reg_code: string
-  device_id: string
-}
-
-export interface CheckRegDeviceReq {
-  app_key: string
-  device_id: string
-}
-
-export interface RegCodeBindCheckResp {
-  expire_time?: number | null
-  remain_count?: number | null
-}
-
-export interface UseCountReq {
-  app_key: string
-  device_id: string
-  use_count: number
-  use_info?: any | null
-}
-
-export interface UseCountResp {
-  remain_count: number
-}
-

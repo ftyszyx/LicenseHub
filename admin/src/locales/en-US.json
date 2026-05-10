@@ -64,8 +64,6 @@
     "dashboard": "Dashboard",
     "apps": "Apps",
     "reg_codes": "Registration Codes",
-    "reg_test": "Reg Test",
-    "use_records": "Use Records",
     "products": "Products",
     "orders": "Orders",
     "users": "Users",
@@ -104,33 +102,7 @@
     "mark_used_confirm": "Mark this code as used?",
     "status_locked": "Binded reg code status cannot be changed",
     "delete_locked": "Only unused reg codes can be deleted",
-    "device_id": "Device ID"
-  },
-  "reg_test": {
-    "title": "Registration API Test",
-    "subtitle": "Standalone page for testing bind and check APIs",
-    "bind_title": "Bind Reg Code",
-    "check_title": "Check Device",
-    "usecount_title": "Use Count",
-    "bind_submit": "Bind",
-    "check_submit": "Check",
-    "usecount_submit": "Consume",
-    "use_count": "Use Count",
-    "use_info": "Use Info(JSON)",
-    "remain_count": "Remain Count",
-    "empty_result": "No result yet",
-    "bind_success": "Bind succeeded",
-    "check_success": "Check succeeded",
-    "usecount_success": "Consume succeeded",
-    "invalid_use_info": "Use info must be valid JSON"
-  },
-  "use_records": {
-    "title": "Use Records",
-    "app": "App",
-    "device_id": "Device ID",
-    "use_count": "Use Count",
-    "use_info": "Use Info",
-    "time": "Time"
+    "device_id": ""
   },
   "products": {
     "input_name": "Enter name",

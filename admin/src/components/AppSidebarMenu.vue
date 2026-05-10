@@ -27,10 +27,6 @@ const menuItems: AdminMenuItem[] = [
   { label: 'menu.devices', icon: 'Iphone', path: RoutePath.AdminDevices },
   //i18n-key: menu.reg_codes
   { label: 'menu.reg_codes', icon: 'Tickets', path: RoutePath.AdminRegCodes },
-  //i18n-key: menu.reg_test
-  { label: 'menu.reg_test', icon: 'Connection', path: RoutePath.AdminRegTest },
-  //i18n-key: menu.use_records
-  { label: 'menu.use_records', icon: 'Memo', path: RoutePath.AdminUseRecords },
 ]
 </script>
 

@@ -5,7 +5,6 @@ use salvo::prelude::*;
 use salvo::test::ResponseExt;
 use salvo::test::TestClient;
 use serde_json::{Value, json};
-use sqlx::PgPool;
 use std::env;
 use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -47,7 +46,6 @@ pub async fn create_test_context() -> TestContext {
     LOG_ONCE.call_once(|| {
         let _ = app::init_log();
     });
-    ensure_test_database().await;
     let app_state = app::init_app()
         .await
         .unwrap_or_else(|e| panic!("failed to initialize app:{}", e.to_string()));
@@ -56,16 +54,6 @@ pub async fn create_test_context() -> TestContext {
         .unwrap();
     println!("clean database");
     sqlx::migrate!("./migrations").undo(&pool, 0).await.unwrap();
-    sqlx::query("DROP TABLE IF EXISTS \"use_records\" CASCADE")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query(
-        "DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'permissions') THEN DELETE FROM permissions WHERE id = 20 OR name = 'use_records:read'; END IF; END $$;",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
     println!("init database");
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     println!("init database success");
@@ -75,58 +63,6 @@ pub async fn create_test_context() -> TestContext {
         token: String::new(),
         app_state: app_state,
     }
-}
-
-async fn ensure_test_database() {
-    let db_name = env::var("DATABASE_NAME").expect("DATABASE_NAME not set");
-    let db_user = env::var("DATABASE_USER").expect("DATABASE_USER not set");
-    let db_password = env::var("DATABASE_PASSWORD").expect("DATABASE_PASSWORD not set");
-    let db_host = env::var("DATABASE_HOST").expect("DATABASE_HOST not set");
-    let db_port = env::var("DATABASE_PORT").expect("DATABASE_PORT not set");
-
-    let mut last_error = None;
-    for admin_db in ["postgres", "template1"] {
-        let admin_url = format!(
-            "postgres://{}:{}@{}:{}/{}",
-            db_user, db_password, db_host, db_port, admin_db
-        );
-
-        match PgPool::connect(&admin_url).await {
-            Ok(pool) => {
-                let exists = sqlx::query_scalar::<_, i32>(
-                    "SELECT 1 FROM pg_database WHERE datname = $1 LIMIT 1",
-                )
-                .bind(&db_name)
-                .fetch_optional(&pool)
-                .await
-                .unwrap_or_else(|err| panic!("failed to inspect test database existence: {err}"));
-
-                if exists.is_none() {
-                    let db_name_quoted = db_name.replace('"', "\"\"");
-                    let db_user_quoted = db_user.replace('"', "\"\"");
-                    let sql = format!(
-                        "CREATE DATABASE \"{}\" OWNER \"{}\"",
-                        db_name_quoted, db_user_quoted
-                    );
-                    sqlx::query(&sql)
-                        .execute(&pool)
-                        .await
-                        .unwrap_or_else(|err| panic!("failed to create test database: {err}"));
-                }
-                return;
-            }
-            Err(err) => {
-                last_error = Some(err);
-            }
-        }
-    }
-
-    panic!(
-        "failed to connect to postgres maintenance database: {}",
-        last_error
-            .map(|err| err.to_string())
-            .unwrap_or_else(|| "unknown error".to_string())
-    );
 }
 
 #[allow(dead_code)]

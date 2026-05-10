@@ -1,16 +1,11 @@
-use bytes::Bytes;
-use salvo::http::ReqBody;
 use salvo::http::header;
+use salvo::http::ReqBody;
 use salvo::prelude::*;
+use bytes::Bytes;
 use std::collections::VecDeque;
 
 #[handler]
-pub async fn log_response_body(
-    req: &mut Request,
-    depot: &mut Depot,
-    res: &mut Response,
-    ctrl: &mut FlowCtrl,
-) {
+pub async fn log_response_body(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
     if !tracing::enabled!(tracing::Level::INFO) {
         ctrl.call_next(req, depot, res).await;
         return;
@@ -90,11 +85,7 @@ fn join_chunks(chunks: VecDeque<Bytes>) -> Bytes {
 fn format_body_preview(bytes: &Bytes) -> (String, bool) {
     const MAX_LEN: usize = 4096;
     let truncated = bytes.len() > MAX_LEN;
-    let slice = if truncated {
-        &bytes[..MAX_LEN]
-    } else {
-        &bytes[..]
-    };
+    let slice = if truncated { &bytes[..MAX_LEN] } else { &bytes[..] };
     let s = String::from_utf8_lossy(slice).to_string();
     (s, truncated)
 }

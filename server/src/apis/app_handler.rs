@@ -30,10 +30,8 @@ pub struct AddAppReq {
     pub app_download_url: String,
     pub app_res_url: String,
     pub app_update_info: Option<String>,
-    pub code_type: Option<i16>,
     pub app_valid_key: Option<String>,
     pub trial_days: Option<i32>,
-    pub trial_num: Option<i32>,
     pub sort_order: i32,
     pub status: i16,
 }
@@ -47,10 +45,8 @@ pub struct UpdateAppReq {
     pub app_download_url: Option<String>,
     pub app_res_url: Option<String>,
     pub app_update_info: Option<String>,
-    pub code_type: Option<i16>,
     pub app_valid_key: Option<String>,
     pub trial_days: Option<i32>,
-    pub trial_num: Option<i32>,
     pub sort_order: Option<i32>,
     pub status: Option<i16>,
 }
@@ -93,10 +89,8 @@ pub async fn add_impl(state: &AppState, req: AddAppReq) -> Result<apps::Model, A
         app_download_url: Set(req.app_download_url),
         app_res_url: Set(req.app_res_url),
         app_update_info: Set(req.app_update_info),
-        code_type: Set(req.code_type.unwrap_or_default()),
         app_valid_key: Set(req.app_valid_key.unwrap_or_default()),
         trial_days: Set(req.trial_days.unwrap_or_default()),
-        trial_num: Set(req.trial_num.unwrap_or_default()),
         sort_order: Set(req.sort_order),
         status: Set(req.status),
         ..Default::default()
@@ -147,17 +141,11 @@ pub async fn update_impl(
     if let Some(v) = req.app_update_info {
         app.app_update_info = Set(Some(v));
     }
-    if let Some(v) = req.code_type {
-        app.code_type = Set(v);
-    }
     if let Some(v) = req.app_valid_key {
         app.app_valid_key = Set(v);
     }
     if let Some(v) = req.trial_days {
         app.trial_days = Set(v);
-    }
-    if let Some(v) = req.trial_num {
-        app.trial_num = Set(v);
     }
     if let Some(v) = req.sort_order {
         app.sort_order = Set(v);

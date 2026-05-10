@@ -1,18 +1,15 @@
-use crate::helpers::print_response_body_get_json;
-use salvo::prelude::*;
-use salvo::test::TestClient;
 use serde_json::json;
+use salvo::prelude::*;
+use salvo::test::{TestClient};
+use crate::helpers::print_response_body_get_json;
 mod helpers;
 
 #[tokio::test]
 async fn test_get_apps_list() {
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
-    let url = helpers::get_url("/api/admin/apps/list?page=1&page_size=10");
-    let response = TestClient::get(url)
-        .add_header("authorization", format!("Bearer {}", token), true)
-        .send(&app)
-        .await;
+    let url=helpers::get_url("/api/admin/apps/list?page=1&page_size=10");
+    let response= TestClient::get(url).add_header("authorization", format!("Bearer {}", token),true).send(&app).await;
     assert_eq!(response.status_code, Some(StatusCode::OK));
     let json = helpers::print_response_body_get_json(response, "get_apps_list").await;
     assert!(json["success"].as_bool().unwrap());
@@ -76,7 +73,7 @@ async fn test_get_app_by_id() {
     let json = print_response_body_get_json(response, "create_app_for_get_by_id").await;
     let app_id = json["data"]["id"].as_i64().unwrap();
 
-    let url = helpers::get_url(&format!("/api/admin/apps/{}", app_id));
+    let url=helpers::get_url(&format!("/api/admin/apps/{}", app_id));
     // 然后通过 ID 获取应用
     let response = TestClient::get(url)
         .add_header("authorization", format!("Bearer {}", token), true)
@@ -183,9 +180,9 @@ async fn test_apps_pagination() {
     let test_cases = vec![
         helpers::get_url("/api/admin/apps/list?page=1&page_size=5"),
         helpers::get_url("/api/admin/apps/list?page=2&page_size=10"),
-        helpers::get_url("/api/admin/apps/list?page=1"), // 使用默认 page_size
+        helpers::get_url("/api/admin/apps/list?page=1"),       // 使用默认 page_size
         helpers::get_url("/api/admin/apps/list?page_size=20"), // 使用默认 page
-        helpers::get_url("/api/admin/apps/list"),        // 使用所有默认值
+        helpers::get_url("/api/admin/apps/list"),              // 使用所有默认值
     ];
 
     for uri in test_cases {
