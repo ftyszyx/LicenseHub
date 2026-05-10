@@ -7,7 +7,6 @@
 文档介绍：https://ftyszyx.github.io/feishu-vitepress/Az6dd7PeSomasjxtphxchUqxnOg
 https://blog.bytefuse.cn/Az6dd7PeSomasjxtphxchUqxnOg
 
-
 ## 背景：
 
 最近写了一个pc端的程序，考虑如何通过软件获取收益呢？
@@ -31,11 +30,11 @@ https://blog.bytefuse.cn/Az6dd7PeSomasjxtphxchUqxnOg
 ## 技术方案
 
 整个系统采用前后端分离设计。
+
 1. 前端就是一个管理员后台，使用vue3.
 2. 后端：最近在学 rust，想拿一个项目练手，所以就用 rust了。 web框架使用salvo：
-https://github.com/salvo-rs/salvo
+   https://github.com/salvo-rs/salvo
 3. 先不加入支付，只用实现注册码生成和验证接口即可。
-
 
 ## 项目结构
 
@@ -47,8 +46,8 @@ pub: 服务器部署相关
 
 ## 本地测试
 
-
 ### 启动服务器
+
 需要有redis和postgres环境
 数据库文件在pub/deploy/postgres/init.sql
 初始账号密码：admin/admin
@@ -58,19 +57,31 @@ pub: 服务器部署相关
 修改.env.example为.env
 配置其中的参数
 
-#### 启动
+#### 启动后端
+
+##### 如果没有初始化数据库，需要先migrate
 
 ```
 cd server
+sqlx migrate run --database-url postgres://test:123456@localhost:5432/hub
+```
+
+```
+
+cd server
 cargo run
+
 ```
 
 ### 启动前端
+
 需要有node.js环境
 
 ```
+
 cd admin
 npm run dev
+
 ```
 
 ## 服务器部署
@@ -87,34 +98,43 @@ npm run dev
 ### 启动服务器
 
 ```
-cd  pub
+
+cd pub
 update_server.sh
 
 ```
+
 ### 启动前端
 
 需要nginx配置
 
 ```
+
 location / {
-        try_files $uri $uri/ /index.html;
-    }
+try_files $uri $uri/ /index.html;
+}
+
 ```
 
 编译生成对应的前端资源
+
 ```
+
 python build_web.py --base-url {your server_url}
+
 ```
 
 将目录下的资源同步到网站目录即可
 
 ```
-rsync -avz web/ /opt/1panel/www/sites/index/ 
+
+rsync -avz web/ /opt/1panel/www/sites/index/
 
 ```
 
 ## 效果展示
-### 创建一个应用 
+
+### 创建一个应用
 
 ![](https://ftyszyx.github.io/feishu-vitepress/assets/Nohdbg42JoE3tLx2BBBcJ4Qenil.png)
 
@@ -130,7 +150,7 @@ rsync -avz web/ /opt/1panel/www/sites/index/
 
 ![](https://ftyszyx.github.io/feishu-vitepress/assets/IHaMbSnesov0dBxGb8nczoQynrc.png)
 
-###  验证注册码接口
+### 验证注册码接口
 
 ![](https://ftyszyx.github.io/feishu-vitepress/assets/J7qbbVWFloPGj3xU1Mbc2xbRncb.png)
 
@@ -165,7 +185,7 @@ rsync -avz web/ /opt/1panel/www/sites/index/
 
 ![](https://ftyszyx.github.io/feishu-vitepress/assets/E4A9byFIhoVuC7xVBYPcZc2knZb.png)
 
-返回 
+返回
 
 ```json
 {
@@ -184,13 +204,7 @@ rsync -avz web/ /opt/1panel/www/sites/index/
 
 ![](https://ftyszyx.github.io/feishu-vitepress/assets/VoQQbdDswockkzxa8F7cWpShnEt.png)
 
-
-
 ## 开发相关
-
-
-
-
 
 ## 问题反馈
 
@@ -207,9 +221,3 @@ qq群： 572194495
 ## todos
 
 1. 角色权限管理
-
-
-
-
-
-
