@@ -23,6 +23,10 @@ const menuItems: AdminMenuItem[] = [
   { label: 'menu.permissions', icon: 'Lock', path: RoutePath.AdminPermissions },
   //i18n-key: menu.apps
   { label: 'menu.apps', icon: 'Cpu', path: RoutePath.AdminApps },
+  //i18n-key: menu.products
+  { label: 'menu.products', icon: 'Goods', path: RoutePath.AdminProducts },
+  //i18n-key: menu.orders
+  { label: 'menu.orders', icon: 'ShoppingCart', path: RoutePath.AdminOrders },
   //i18n-key: menu.devices
   { label: 'menu.devices', icon: 'Iphone', path: RoutePath.AdminDevices },
   //i18n-key: menu.reg_codes

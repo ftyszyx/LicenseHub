@@ -64,6 +64,72 @@ async fn test_validate_reg_code_post_and_get() {
 }
 
 #[tokio::test]
+async fn test_count_reg_code_becomes_binded_after_validate() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    let app_key = helpers::unique_name("COUNTKEY");
+    let create_app_body = json!({
+        "name": helpers::unique_name("CountApp"),
+        "app_id": helpers::unique_name("com.count"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": app_key,
+        "code_type": 1,
+        "trial_num": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_count_app_for_validate").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+    let code = helpers::unique_name("COUNTCODE");
+    let create_rc = json!({
+        "code": code,
+        "app_id": app_id,
+        "valid_days": 0,
+        "max_devices": 1,
+        "status": 1,
+        "code_type": 1,
+        "total_count": 3
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_rc)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_count_reg_code").await;
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"code":code, "app_key":app_key, "device_id":"count-dev-1"}))
+        .send(&ctx.app)
+        .await;
+    assert_eq!(resp.status_code, Some(StatusCode::OK));
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{}",
+        reg_code_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "get_count_reg_code_after_validate").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["status"].as_i64().unwrap(), 2);
+}
+
+#[tokio::test]
 async fn test_validate_device_without_code() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;
@@ -531,9 +597,7 @@ async fn test_count_reg_code_activation_and_exhaust() {
     let json = print_response_body_get_json(resp, "create_app_count_activation").await;
     let app_id = json["data"]["id"].as_i64().unwrap() as i32;
 
-    let pool = sqlx::PgPool::connect(&ctx.get_db_url())
-        .await
-        .unwrap();
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
     sqlx::query("update apps set code_type = 1 where id = $1")
         .bind(app_id)
         .execute(&pool)

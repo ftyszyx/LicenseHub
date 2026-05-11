@@ -4,7 +4,7 @@ use crate::core::response::ApiResponse;
 use data_model::{permissions, role_permissions};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::extract::PathParam;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, ActiveModelTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug)]
@@ -40,7 +40,9 @@ pub struct SetRolePermissionsReq {
 }
 
 #[handler]
-pub async fn list_permissions(depot: &mut Depot) -> Result<ApiResponse<Vec<PermissionInfo>>, AppError> {
+pub async fn list_permissions(
+    depot: &mut Depot,
+) -> Result<ApiResponse<Vec<PermissionInfo>>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let list = permissions::Entity::find().all(&state.db).await?;
     let mut resp: Vec<PermissionInfo> = list.into_iter().map(PermissionInfo::from).collect();

@@ -1,21 +1,55 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { RoutePath } from '@/types/route'
+
+const authStore = useAuthStore()
+
+const adminRoute = computed(() => (
+  authStore.isAuthenticated ? RoutePath.AdminDashboard : RoutePath.Login
+))
 </script>
 
 <template>
-  <header class="bg-white shadow-md">
-    <div class="container mx-auto px-4">
-      <nav class="flex items-center justify-between h-16">
-        <div class="flex items-center space-x-4">
-           <RouterLink to="/" class="text-gray-600 hover:text-gray-900">{{ $t('home.nav_home') }}</RouterLink>
-           <RouterLink to="/products" class="text-gray-600 hover:text-gray-900">{{ $t('home.nav_products') }}</RouterLink>
+  <header class="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6">
+      <nav class="flex h-16 items-center justify-between">
+        <RouterLink to="/" class="flex items-center gap-3 text-slate-950">
+          <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-sm font-semibold text-white">
+            LH
+          </span>
+          <span class="text-base font-semibold tracking-normal">LicenseHub</span>
+        </RouterLink>
+
+        <div class="flex items-center rounded-lg bg-slate-100 p-1">
+          <RouterLink
+            to="/"
+            class="rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-950"
+            exact-active-class="bg-white text-slate-950 shadow-sm"
+          >
+            {{ $t('home.nav_home') }}
+          </RouterLink>
+          <RouterLink
+            :to="RoutePath.OrderQuery"
+            class="rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:text-slate-950"
+            active-class="bg-white text-slate-950 shadow-sm"
+          >
+            {{ $t('home.nav_order_query') }}
+          </RouterLink>
         </div>
-        <RouterLink to="/login" class="px-4 py-2 text-sm text-white bg-gray-800 rounded hover:bg-gray-900">{{ $t('home.nav_admin') }}</RouterLink>
+
+        <RouterLink
+          :to="adminRoute"
+          class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-950 hover:bg-slate-950 hover:text-white"
+        >
+          {{ $t('home.nav_admin') }}
+        </RouterLink>
       </nav>
     </div>
   </header>
 
-  <main>
+  <main class="bg-slate-50">
     <RouterView />
   </main>
 </template>

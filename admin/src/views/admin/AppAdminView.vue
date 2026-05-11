@@ -32,12 +32,6 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('apps.version')" min-width="160">
-          <template #default="{ row }">
-            <el-tag type="info" effect="light">{{ row.app_vername }}</el-tag>
-            <span class="ml-2 text-gray-500">(#{{ row.app_vercode }})</span>
-          </template>
-        </el-table-column>
         <el-table-column :label="$t('apps.valid_key')" min-width="260">
           <template #default="{ row }">
             <div class="flex items-center gap-2">
@@ -66,31 +60,18 @@
             }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('apps.links')" min-width="200">
-          <template #default="{ row }">
-            <el-link :href="row.app_download_url" target="_blank" type="primary" underline="never" class="mr-3">
-              <el-icon class="mr-1"><Download /></el-icon>{{ $t("apps.download") }}
-            </el-link>
-            <el-link :href="row.app_res_url" target="_blank" type="primary" underline="never">
-              <el-icon class="mr-1"><Link /></el-icon>{{ $t("apps.resource") }}
-            </el-link>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('apps.update_info')" min-width="200">
-          <template #default="{ row }">
-            <el-tooltip :content="row.app_update_info || '-'" placement="top" effect="dark">
-              <span class="truncate block max-w-[320px] text-gray-600">{{ row.app_update_info || "-" }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
         <el-table-column :label="$t('apps.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column :label="$t('apps.updated')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="200" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
           <template #default="scope">
+            <el-button size="small" type="success" plain @click="openBuyPage(scope.row)">
+              <el-icon class="mr-1"><ShoppingCart /></el-icon>
+              购买页
+            </el-button>
             <el-button size="small" @click="openEdit(scope.row)">
               <el-icon class="mr-1"><Edit /></el-icon>
               {{ $t("common.edit") }}
@@ -128,21 +109,6 @@
               <el-button @click="genAppId">{{ $t('common.generate') }}</el-button>
             </template>
           </el-input>
-        </el-form-item>
-        <el-form-item :label="$t('apps.version_name')" prop="app_vername">
-          <el-input v-model="form.app_vername" />
-        </el-form-item>
-        <el-form-item :label="$t('apps.version_code')" prop="app_vercode">
-          <el-input-number v-model="form.app_vercode" :min="0" />
-        </el-form-item>
-        <el-form-item :label="$t('apps.download_url')" prop="app_download_url">
-          <el-input v-model="form.app_download_url" />
-        </el-form-item>
-        <el-form-item :label="$t('apps.resource_url')" prop="app_res_url">
-          <el-input v-model="form.app_res_url" />
-        </el-form-item>
-        <el-form-item :label="$t('apps.update_info')" prop="app_update_info">
-          <el-input v-model="form.app_update_info" type="textarea" :rows="3" />
         </el-form-item>
         <el-form-item :label="$t('apps.valid_key')" prop="app_valid_key">
           <el-input v-model="(form as any).app_valid_key">
@@ -191,11 +157,14 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
 import { useI18n } from 'vue-i18n'
 import { RegCodeType } from '@/types/reg_codes'
+import { useRouter } from 'vue-router'
+import { RoutePath } from '@/types/route'
 
 const apps = ref<AppModel[]>([]);
 const page = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
+const router = useRouter()
 
 const query = reactive({
   name: "" as string | undefined,
@@ -228,8 +197,8 @@ const dialog = reactive({ visible: false, mode: "create" as "create" | "edit", e
 const emptyForm: AddAppReq = {
   name: "",
   app_id: "",
-  app_vername: "",
-  app_vercode: 0,
+  app_vername: "1.0.0",
+  app_vercode: 1,
   app_download_url: "",
   app_res_url: "",
   app_update_info: "",
@@ -246,9 +215,7 @@ const { t } = useI18n()
 const rules = reactive<FormRules<AddAppReq>>({
   name: [{ required: true, message: t("apps.input_name") }],
   app_id: [{ required: true, message: t("apps.input_app_id") }],
-  app_vername: [{ required: true, message: t("apps.input_version_name") }],
   app_valid_key: [{ required: true, message: t("apps.input_valid_key") }],
-  app_vercode: [{ required: true, message: t("apps.input_version_code") }],
 });
 
 const onCodeTypeChange = () => {
@@ -273,10 +240,10 @@ const openEdit = (row: AppModel) => {
   Object.assign(form, {
     name: row.name,
     app_id: row.app_id,
-    app_vername: row.app_vername,
-    app_vercode: row.app_vercode,
-    app_download_url: row.app_download_url,
-    app_res_url: row.app_res_url,
+    app_vername: row.app_vername || "1.0.0",
+    app_vercode: row.app_vercode || 1,
+    app_download_url: row.app_download_url || "",
+    app_res_url: row.app_res_url || "",
     app_update_info: row.app_update_info || "",
     code_type: (row as any).code_type ?? 0,
     app_valid_key: row.app_valid_key || "",
@@ -288,6 +255,10 @@ const openEdit = (row: AppModel) => {
   onCodeTypeChange();
   dialog.visible = true;
 };
+
+const openBuyPage = (row: AppModel) => {
+  router.push(`${RoutePath.Products}/${row.id}`)
+}
 
 const submitForm = async (formRef: FormInstance|undefined) => {
   //validate form

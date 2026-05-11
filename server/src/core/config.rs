@@ -7,6 +7,7 @@ pub struct Config {
     pub redis: RedisConfig,
     pub jwt: JwtConfig,
     pub server: ServerConfig,
+    pub caidou_pay: CaidouPayConfig,
     pub register_open: bool,
 }
 
@@ -44,6 +45,18 @@ pub struct ServerConfig {
     pub port: u16,
 }
 
+#[derive(Debug, Clone)]
+pub struct CaidouPayConfig {
+    pub enabled: bool,
+    pub base_url: String,
+    pub pid: String,
+    pub key: String,
+    pub pay_types: Vec<String>,
+    pub public_base_url: String,
+    pub frontend_base_url: String,
+    pub site_name: String,
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, AppError> {
         Ok(Config {
@@ -51,6 +64,7 @@ impl Config {
             redis: RedisConfig::from_env()?,
             jwt: JwtConfig::from_env()?,
             server: ServerConfig::from_env()?,
+            caidou_pay: CaidouPayConfig::from_env()?,
             register_open: env::var("REGISTER_OPEN")
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
@@ -115,8 +129,7 @@ impl RedisConfig {
                 .map_err(|_| AppError::Message("REDIS_USERNAME must be set".to_string()))?,
             password: env::var("REDIS_PASSWORD")
                 .map_err(|_| AppError::Message("REDIS_PASSWORD must be set".to_string()))?,
-            key_prefix: env::var("REDIS_KEY_PREFIX")
-                .unwrap_or_else(|_| "hub_".to_string()),
+            key_prefix: env::var("REDIS_KEY_PREFIX").unwrap_or_else(|_| "hub_".to_string()),
         })
     }
 }
@@ -142,6 +155,40 @@ impl ServerConfig {
                 .unwrap_or_else(|_| "3000".to_string())
                 .parse()
                 .map_err(|_| AppError::Message("Invalid LISTEN_PORT value".to_string()))?,
+        })
+    }
+}
+
+impl CaidouPayConfig {
+    fn from_env() -> Result<Self, AppError> {
+        let enabled = env::var("PAYMENT_ENABLED")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .map_err(|_| AppError::Message("Invalid PAYMENT_ENABLED value".to_string()))?;
+        Ok(CaidouPayConfig {
+            enabled,
+            base_url: env::var("CAIDOU_BASE_URL")
+                .unwrap_or_else(|_| "https://pay.521cd.cn".to_string())
+                .trim_end_matches('/')
+                .to_string(),
+            pid: env::var("CAIDOU_PID").unwrap_or_default(),
+            key: env::var("CAIDOU_KEY").unwrap_or_default(),
+            pay_types: env::var("CAIDOU_PAY_TYPES")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect(),
+            public_base_url: env::var("PUBLIC_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:3000".to_string())
+                .trim_end_matches('/')
+                .to_string(),
+            frontend_base_url: env::var("FRONTEND_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:9070".to_string())
+                .trim_end_matches('/')
+                .to_string(),
+            site_name: env::var("PAYMENT_SITE_NAME").unwrap_or_else(|_| "LicenseHub".to_string()),
         })
     }
 }

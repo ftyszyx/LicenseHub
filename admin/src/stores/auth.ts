@@ -1,21 +1,53 @@
 import { defineStore } from 'pinia'
 import type { AuthPayload, RegisterPayload } from '@/types'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { sentLogin, sentRegister } from '@/apis'
+
+type JwtPayload = {
+  exp?: number
+}
+
+function decodeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+  return atob(padded)
+}
+
+function isTokenUsable(token: string | null) {
+  if (!token) return false
+  const [, payload] = token.split('.')
+  if (!payload) return false
+
+  try {
+    const claims = JSON.parse(decodeBase64Url(payload)) as JwtPayload
+    return typeof claims.exp === 'number' && claims.exp * 1000 > Date.now()
+  } catch {
+    return false
+  }
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token'))
-  const isAuthenticated = ref(!!token.value)
+  const isAuthenticated = computed(() => isTokenUsable(token.value))
+
+  if (token.value && !isTokenUsable(token.value)) {
+    localStorage.removeItem('token')
+    token.value = null
+  }
+
+  function hasValidSession() {
+    if (isTokenUsable(token.value)) return true
+    clearToken()
+    return false
+  }
 
   function setToken(newToken: string) {
     token.value = newToken
-    isAuthenticated.value = true
     localStorage.setItem('token', newToken)
   }
 
   function clearToken() {
     token.value = null
-    isAuthenticated.value = false
     localStorage.removeItem('token')
   }
 
@@ -33,5 +65,5 @@ export const useAuthStore = defineStore('auth', () => {
     clearToken()
   }
 
-  return { token, isAuthenticated, login, logout, register }
-}) 
+  return { token, isAuthenticated, hasValidSession, login, logout, register, clearToken }
+})

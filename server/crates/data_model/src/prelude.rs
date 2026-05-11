@@ -2,6 +2,9 @@
 
 pub use super::app_devices::Entity as AppDevices;
 pub use super::apps::Entity as Apps;
+pub use super::license_plans::Entity as LicensePlans;
+pub use super::order_events::Entity as OrderEvents;
+pub use super::orders::Entity as Orders;
 pub use super::permissions::Entity as Permissions;
 pub use super::reg_codes::Entity as RegCodes;
 pub use super::role_permissions::Entity as RolePermissions;

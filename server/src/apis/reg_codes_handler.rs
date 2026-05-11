@@ -49,7 +49,7 @@ impl From<CodeType> for i16 {
 #[serde(from = "i16", into = "i16")]
 pub enum RegCodeStatus {
     Unused = 0,
-    Used = 1,
+    Issued = 1,
     Binded = 2,
 }
 
@@ -63,7 +63,7 @@ impl From<i16> for RegCodeStatus {
     fn from(value: i16) -> Self {
         match value {
             0 => RegCodeStatus::Unused,
-            1 => RegCodeStatus::Used,
+            1 => RegCodeStatus::Issued,
             2 => RegCodeStatus::Binded,
             _ => RegCodeStatus::Unused,
         }
@@ -341,7 +341,8 @@ pub async fn update_status_impl(
     req: UpdateRegCodeStatusReq,
 ) -> Result<RegCodeInfo, AppError> {
     let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
-    let reg_code = reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+    let reg_code =
+        reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
 
     if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded {
         return Err(AppError::business_logic(
@@ -652,7 +653,11 @@ pub async fn time_reg_code_validate(
                 active_reg_model.device_id = Set(Some(dm.id));
                 let device_expire = dm.expire_time.unwrap_or(now);
                 //check device expire time, if it is less than now, use now as device expire time
-                let device_expire = if device_expire < now { now } else { device_expire };
+                let device_expire = if device_expire < now {
+                    now
+                } else {
+                    device_expire
+                };
                 let expire_time =
                     device_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
                 let mut active_device_model = dm.into_active_model();
@@ -725,6 +730,7 @@ pub async fn count_reg_code_validate(
     let ctx = state.db.begin().await?;
     let mut reg_code_active = reg_code_model.clone().into_active_model();
     reg_code_active.binding_time = Set(Some(now));
+    reg_code_active.status = Set(RegCodeStatus::Binded.into());
     let remain_count_after = match device_model {
         Some(device_model) => {
             // update device

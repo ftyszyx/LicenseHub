@@ -65,7 +65,7 @@
         <el-table-column :label="$t('common.actions')" width="180" fixed="right" align="right">
           <template #default="{ row }">
             <div class="flex justify-end gap-2">
-              <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" plain @click="markUsed(row)">{{ $t('reg_codes.mark_used') }}</el-button>
+              <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" plain @click="markIssued(row)">{{ $t('reg_codes.mark_issued') }}</el-button>
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="danger" plain @click="del(row.id)">{{ $t('common.delete') }}</el-button>
             </div>
           </template>
@@ -127,7 +127,7 @@ const statusOptions = (Object.values(RegCodeStatus).filter(v => typeof v === 'nu
 
 function statusTagType(status: RegCodeStatus) {
   if (status === RegCodeStatus.Unused) return 'info'
-  if (status === RegCodeStatus.Used) return 'success'
+  if (status === RegCodeStatus.Issued) return 'success'
   if (status === RegCodeStatus.binded) return 'warning'
   return 'info'
 }
@@ -158,13 +158,13 @@ async function del(id: number) {
   reload()
 }
 
-async function markUsed(row: RegCodeModel) {
+async function markIssued(row: RegCodeModel) {
   if (row.status === RegCodeStatus.binded) {
     ElMessage.warning(t('reg_codes.status_locked'))
     return
   }
-  await ElMessageBox.confirm(t('reg_codes.mark_used_confirm'), t('common.confirm'), { type: 'warning' })
-  await updateRegCodeStatus(row.id, RegCodeStatus.Used)
+  await ElMessageBox.confirm(t('reg_codes.mark_issued_confirm'), t('common.confirm'), { type: 'warning' })
+  await updateRegCodeStatus(row.id, RegCodeStatus.Issued)
   ElMessage.success(t('common.saved'))
   reload()
 }

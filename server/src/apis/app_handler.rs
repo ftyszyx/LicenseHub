@@ -30,8 +30,10 @@ pub struct AddAppReq {
     pub app_download_url: String,
     pub app_res_url: String,
     pub app_update_info: Option<String>,
+    pub code_type: Option<i16>,
     pub app_valid_key: Option<String>,
     pub trial_days: Option<i32>,
+    pub trial_num: Option<i32>,
     pub sort_order: i32,
     pub status: i16,
 }
@@ -45,8 +47,10 @@ pub struct UpdateAppReq {
     pub app_download_url: Option<String>,
     pub app_res_url: Option<String>,
     pub app_update_info: Option<String>,
+    pub code_type: Option<i16>,
     pub app_valid_key: Option<String>,
     pub trial_days: Option<i32>,
+    pub trial_num: Option<i32>,
     pub sort_order: Option<i32>,
     pub status: Option<i16>,
 }
@@ -81,6 +85,8 @@ pub async fn add(
 }
 
 pub async fn add_impl(state: &AppState, req: AddAppReq) -> Result<apps::Model, AppError> {
+    let code_type = normalize_code_type(req.code_type)?;
+    let (trial_days, trial_num) = normalize_trial_limits(code_type, req.trial_days, req.trial_num);
     let active_model = apps::ActiveModel {
         name: Set(req.name),
         app_id: Set(req.app_id),
@@ -89,8 +95,10 @@ pub async fn add_impl(state: &AppState, req: AddAppReq) -> Result<apps::Model, A
         app_download_url: Set(req.app_download_url),
         app_res_url: Set(req.app_res_url),
         app_update_info: Set(req.app_update_info),
+        code_type: Set(code_type),
         app_valid_key: Set(req.app_valid_key.unwrap_or_default()),
-        trial_days: Set(req.trial_days.unwrap_or_default()),
+        trial_days: Set(trial_days),
+        trial_num: Set(trial_num),
         sort_order: Set(req.sort_order),
         status: Set(req.status),
         ..Default::default()
@@ -119,6 +127,12 @@ pub async fn update_impl(
 ) -> Result<apps::Model, AppError> {
     let app = apps::Entity::find_by_id(id).one(&state.db).await?;
     let app = app.ok_or_else(|| AppError::not_found("apps".to_string(), Some(id)))?;
+    let final_code_type = normalize_code_type(req.code_type.or(Some(app.code_type)))?;
+    let (final_trial_days, final_trial_num) = normalize_trial_limits(
+        final_code_type,
+        req.trial_days.or(Some(app.trial_days)),
+        req.trial_num.or(Some(app.trial_num)),
+    );
     let mut app: apps::ActiveModel = app.into_active_model();
     if let Some(v) = req.name {
         app.name = Set(v);
@@ -141,12 +155,14 @@ pub async fn update_impl(
     if let Some(v) = req.app_update_info {
         app.app_update_info = Set(Some(v));
     }
+    if req.code_type.is_some() {
+        app.code_type = Set(final_code_type);
+    }
     if let Some(v) = req.app_valid_key {
         app.app_valid_key = Set(v);
     }
-    if let Some(v) = req.trial_days {
-        app.trial_days = Set(v);
-    }
+    app.trial_days = Set(final_trial_days);
+    app.trial_num = Set(final_trial_num);
     if let Some(v) = req.sort_order {
         app.sort_order = Set(v);
     }
@@ -155,6 +171,25 @@ pub async fn update_impl(
     }
     let app = app.update(&state.db).await?;
     Ok(app)
+}
+
+fn normalize_code_type(value: Option<i16>) -> Result<i16, AppError> {
+    match value.unwrap_or_default() {
+        0 => Ok(0),
+        1 => Ok(1),
+        _ => Err(AppError::validation("code_type must be 0 or 1")),
+    }
+}
+
+fn normalize_trial_limits(
+    code_type: i16,
+    trial_days: Option<i32>,
+    trial_num: Option<i32>,
+) -> (i32, i32) {
+    match code_type {
+        1 => (0, trial_num.unwrap_or_default()),
+        _ => (trial_days.unwrap_or_default(), 0),
+    }
 }
 
 #[handler]

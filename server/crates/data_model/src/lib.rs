@@ -1,5 +1,8 @@
 pub mod app_devices;
 pub mod apps;
+pub mod license_plans;
+pub mod order_events;
+pub mod orders;
 pub mod permissions;
 pub mod prelude;
 pub mod reg_codes;

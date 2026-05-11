@@ -24,7 +24,7 @@ export enum RegCodeType {
 
 export enum RegCodeStatus {
   Unused = 0,
-  Used = 1,
+  Issued = 1,
   binded = 2,
 }
 

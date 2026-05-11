@@ -1,7 +1,7 @@
+use crate::apis::log_middleware;
 use crate::apis::{self, *};
 use crate::core::app::AppState;
 use crate::core::rbac::RequirePerm;
-use crate::apis::log_middleware;
 use salvo::cors::{AllowHeaders, AllowOrigin, Cors};
 use salvo::http::Method;
 use salvo::prelude::*;
@@ -88,7 +88,9 @@ pub fn create_router(app_state: AppState) -> Service {
                 .put(apis::app_handler::update),
         )
         .push(
-            Router::with_path("apps/{id}") .hoop(RequirePerm::new("apps", "DELETE")) .delete(apis::app_handler::delete),
+            Router::with_path("apps/{id}")
+                .hoop(RequirePerm::new("apps", "DELETE"))
+                .delete(apis::app_handler::delete),
         )
         //roles
         .push(
@@ -117,6 +119,31 @@ pub fn create_router(app_state: AppState) -> Service {
                 .delete(apis::role_handler::delete),
         )
         //products
+        .push(
+            Router::with_path("plans")
+                .hoop(RequirePerm::new("plans", "CREATE"))
+                .post(apis::payment_handler::create_plan),
+        )
+        .push(
+            Router::with_path("plans/list")
+                .hoop(RequirePerm::new("plans", "READ"))
+                .get(apis::payment_handler::list_plans),
+        )
+        .push(
+            Router::with_path("plans/{id}")
+                .hoop(RequirePerm::new("plans", "UPDATE"))
+                .put(apis::payment_handler::update_plan),
+        )
+        .push(
+            Router::with_path("plans/{id}")
+                .hoop(RequirePerm::new("plans", "DELETE"))
+                .delete(apis::payment_handler::delete_plan),
+        )
+        .push(
+            Router::with_path("orders/list")
+                .hoop(RequirePerm::new("orders", "READ"))
+                .get(apis::payment_handler::list_orders),
+        )
         //reg_codes
         .push(
             Router::with_path("reg_codes")
@@ -172,6 +199,20 @@ pub fn create_router(app_state: AppState) -> Service {
         .hoop(affix_state::inject(app_state))
         .push(Router::with_path("/api/login").post(apis::auth::login))
         .get(health_check)
+        .push(Router::with_path("/api/products").get(apis::payment_handler::list_public_plans))
+        .push(Router::with_path("/api/pay/methods").get(apis::payment_handler::list_pay_methods))
+        .push(Router::with_path("/api/orders").post(apis::payment_handler::create_order))
+        .push(Router::with_path("/api/orders/{order_no}").get(apis::payment_handler::get_order))
+        .push(
+            Router::with_path("/api/pay/caidou/notify")
+                .get(apis::payment_handler::caidou_notify)
+                .post(apis::payment_handler::caidou_notify),
+        )
+        .push(
+            Router::with_path("/api/pay/caidou/return")
+                .get(apis::payment_handler::caidou_return)
+                .post(apis::payment_handler::caidou_return),
+        )
         .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
         .push(
             Router::with_path("/api/reg/validate").get(apis::reg_codes_handler::validate_code_get),

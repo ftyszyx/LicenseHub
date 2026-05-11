@@ -9,6 +9,10 @@ import PermissionAdminView from '@/views/admin/PermissionAdminView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import RegisterView from '@/views/auth/RegisterView.vue'
 import DevicesAdminView from '@/views/admin/DevicesAdminView.vue'
+import PlansAdminView from '@/views/admin/PlansAdminView.vue'
+import OrdersAdminView from '@/views/admin/OrdersAdminView.vue'
+import PayResultView from '@/views/PayResultView.vue'
+import OrderQueryView from '@/views/OrderQueryView.vue'
 
 import { useAuthStore } from '@/stores/auth'
 import { RouteName, RoutePath } from '@/types'
@@ -28,7 +32,22 @@ const router = createRouter({
                 {
                     path: RoutePath.Products,
                     name: RouteName.Products,
+                    redirect: RoutePath.Home
+                },
+                {
+                    path: `${RoutePath.Products}/:appid`,
+                    name: RouteName.AppProducts,
                     component: () => import('@/views/ProductsView.vue')
+                },
+                {
+                    path: RoutePath.OrderQuery,
+                    name: RouteName.OrderQuery,
+                    component: OrderQueryView
+                },
+                {
+                    path: RoutePath.PayResult,
+                    name: RouteName.PayResult,
+                    component: PayResultView
                 }
             ]
         },
@@ -69,6 +88,16 @@ const router = createRouter({
                     component: AppAdminView
                 },
                 {
+                    path: RoutePath.AdminProducts,
+                    name: RouteName.AdminProducts,
+                    component: PlansAdminView
+                },
+                {
+                    path: RoutePath.AdminOrders,
+                    name: RouteName.AdminOrders,
+                    component: OrdersAdminView
+                },
+                {
                     path: RoutePath.AdminDevices,
                     name: RouteName.AdminDevices,
                     component: DevicesAdminView
@@ -90,11 +119,11 @@ const router = createRouter({
 
 router.beforeEach((to, _, next) => {
     const authStore = useAuthStore()
-    if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    if (to.meta.requiresAuth && !authStore.hasValidSession()) {
         next({ name: 'login' })
     } else {
         next()
     }
 })
 
-export default router 
+export default router
