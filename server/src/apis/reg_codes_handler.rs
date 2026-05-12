@@ -1,4 +1,5 @@
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
+use crate::apis::use_record_handler::create_use_record;
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
@@ -100,6 +101,41 @@ pub struct RegCodeValidateResp {
     pub code_type: CodeType,
     pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub remaining_count: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
+pub struct RegCodeBindReq {
+    pub app_key: String,
+    #[serde(alias = "code")]
+    pub reg_code: String,
+    pub device_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
+pub struct RegCodeCheckReq {
+    pub app_key: String,
+    pub device_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
+pub struct RegCodeStatusResp {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expire_time: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remain_count: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Validate)]
+pub struct UseCountReq {
+    pub app_key: String,
+    pub device_id: String,
+    pub use_count: i32,
+    pub use_info: Option<sea_orm::prelude::Json>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UseCountResp {
+    pub remain_count: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
@@ -507,6 +543,411 @@ pub async fn validate_code_get(
     let json = req.parse_queries::<RegCodeValidateReq>()?;
     let resp = validate_code_impl(&state, json).await?;
     Ok(ApiResponse::success(resp))
+}
+
+#[endpoint(tags("reg_codes"))]
+pub async fn bind_code(
+    depot: &mut Depot,
+    req: JsonBody<RegCodeBindReq>,
+) -> Result<ApiResponse<RegCodeStatusResp>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let resp = bind_code_impl(&state, req.into_inner()).await?;
+    Ok(ApiResponse::success(resp))
+}
+
+#[endpoint(tags("reg_codes"))]
+pub async fn bind_code_get(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<RegCodeStatusResp>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let json = req.parse_queries::<RegCodeBindReq>()?;
+    let resp = bind_code_impl(&state, json).await?;
+    Ok(ApiResponse::success(resp))
+}
+
+#[endpoint(tags("reg_codes"))]
+pub async fn check_device(
+    depot: &mut Depot,
+    req: JsonBody<RegCodeCheckReq>,
+) -> Result<ApiResponse<RegCodeStatusResp>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let resp = check_device_impl(&state, req.into_inner()).await?;
+    Ok(ApiResponse::success(resp))
+}
+
+#[endpoint(tags("reg_codes"))]
+pub async fn check_device_get(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<RegCodeStatusResp>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let json = req.parse_queries::<RegCodeCheckReq>()?;
+    let resp = check_device_impl(&state, json).await?;
+    Ok(ApiResponse::success(resp))
+}
+
+#[handler]
+pub async fn use_count(
+    depot: &mut Depot,
+    req: JsonBody<UseCountReq>,
+) -> Result<ApiResponse<UseCountResp>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let resp = use_count_impl(&state, req.into_inner()).await?;
+    Ok(ApiResponse::success(resp))
+}
+
+async fn find_app_by_key(state: &AppState, app_key: &str) -> Result<apps::Model, AppError> {
+    apps::Entity::find()
+        .filter(apps::Column::AppValidKey.eq(app_key.to_string()))
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::not_found("apps".to_string(), None))
+}
+
+async fn find_device_by_app_and_id(
+    state: &AppState,
+    app_id: i32,
+    device_id: &str,
+) -> Result<Option<app_devices::Model>, AppError> {
+    app_devices::Entity::find()
+        .filter(
+            app_devices::Column::AppId
+                .eq(app_id)
+                .and(app_devices::Column::DeviceId.eq(device_id.to_string())),
+        )
+        .one(&state.db)
+        .await
+        .map_err(AppError::from)
+}
+
+async fn find_reg_code_by_app_and_code(
+    state: &AppState,
+    app_id: i32,
+    code: &str,
+) -> Result<reg_codes::Model, AppError> {
+    reg_codes::Entity::find()
+        .filter(
+            reg_codes::Column::AppId
+                .eq(app_id)
+                .and(reg_codes::Column::Code.eq(code.to_string())),
+        )
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::not_found("reg_code".to_string(), None))
+}
+
+fn time_status_resp(expire_time: DateTime<FixedOffset>) -> RegCodeStatusResp {
+    RegCodeStatusResp {
+        expire_time: Some(expire_time.timestamp()),
+        remain_count: None,
+    }
+}
+
+fn count_status_resp(remain_count: i32) -> RegCodeStatusResp {
+    RegCodeStatusResp {
+        expire_time: None,
+        remain_count: Some(remain_count),
+    }
+}
+
+fn ensure_reg_code_bound_to_current_device(
+    device_model: Option<&app_devices::Model>,
+    reg_code_model: &reg_codes::Model,
+) -> Result<(), AppError> {
+    match (reg_code_model.device_id, device_model) {
+        (Some(bound_device_id), Some(device_model)) if device_model.id == bound_device_id => Ok(()),
+        (Some(_), _) => Err(AppError::Message(
+            "reg code already bound to another device".into(),
+        )),
+        (None, _) => Ok(()),
+    }
+}
+
+pub async fn bind_code_impl(
+    state: &AppState,
+    req: RegCodeBindReq,
+) -> Result<RegCodeStatusResp, AppError> {
+    let app_model = find_app_by_key(state, &req.app_key).await?;
+    let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
+    let reg_code_model = find_reg_code_by_app_and_code(state, app_model.id, &req.reg_code).await?;
+
+    match CodeType::from(app_model.code_type) {
+        CodeType::Time => {
+            bind_time_reg_code(
+                state,
+                &app_model,
+                &req.device_id,
+                device_model,
+                &reg_code_model,
+            )
+            .await
+        }
+        CodeType::Count => {
+            bind_count_reg_code(
+                state,
+                &app_model,
+                &req.device_id,
+                device_model,
+                &reg_code_model,
+            )
+            .await
+        }
+    }
+}
+
+pub async fn check_device_impl(
+    state: &AppState,
+    req: RegCodeCheckReq,
+) -> Result<RegCodeStatusResp, AppError> {
+    let app_model = find_app_by_key(state, &req.app_key).await?;
+    let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
+    let now = Utc::now().fixed_offset();
+
+    match CodeType::from(app_model.code_type) {
+        CodeType::Time => {
+            let device_model = match device_model {
+                Some(device_model) => device_model,
+                None => {
+                    if app_model.trial_days <= 0 {
+                        return Err(AppError::Message("app has no trial".into()));
+                    }
+                    let expire_time = now + chrono::Duration::days(app_model.trial_days as i64);
+                    app_devices::ActiveModel {
+                        app_id: Set(app_model.id),
+                        device_id: Set(req.device_id.clone()),
+                        expire_time: Set(Some(expire_time)),
+                        ..Default::default()
+                    }
+                    .insert(&state.db)
+                    .await?
+                }
+            };
+            let expire_time = device_model.expire_time.unwrap_or(now);
+            if expire_time <= now {
+                return Err(AppError::Message("device expired".into()));
+            }
+            Ok(time_status_resp(expire_time))
+        }
+        CodeType::Count => {
+            let device_model = match device_model {
+                Some(device_model) => device_model,
+                None => {
+                    if app_model.trial_num <= 0 {
+                        return Err(AppError::Message("app has no trial".into()));
+                    }
+                    app_devices::ActiveModel {
+                        app_id: Set(app_model.id),
+                        device_id: Set(req.device_id.clone()),
+                        remaining: Set(Some(app_model.trial_num)),
+                        ..Default::default()
+                    }
+                    .insert(&state.db)
+                    .await?
+                }
+            };
+            let remain_count = device_model.remaining.unwrap_or(0);
+            if remain_count <= 0 {
+                return Err(AppError::Message("device remaining count is 0".into()));
+            }
+            Ok(count_status_resp(remain_count))
+        }
+    }
+}
+
+pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCountResp, AppError> {
+    if req.use_count <= 0 {
+        return Err(AppError::Message("use_count must be greater than 0".into()));
+    }
+
+    let app_model = find_app_by_key(state, &req.app_key).await?;
+    if CodeType::from(app_model.code_type) != CodeType::Count {
+        return Err(AppError::Message("app code type is not count".into()));
+    }
+
+    let tx = state.db.begin().await?;
+    let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
+    let remain_after = match device_model {
+        Some(device_model) => {
+            let remain_before = device_model.remaining.unwrap_or(0);
+            if remain_before <= 0 {
+                return Err(AppError::Message("device remaining count is 0".into()));
+            }
+            if remain_before < req.use_count {
+                return Err(AppError::Message(format!(
+                    "device remaining count is not enough: remain={}, required={}",
+                    remain_before, req.use_count
+                )));
+            }
+
+            let remain_after = remain_before - req.use_count;
+            let mut active_device_model = device_model.into_active_model();
+            active_device_model.remaining = Set(Some(remain_after));
+            active_device_model.update(&tx).await?;
+            remain_after
+        }
+        None => {
+            if app_model.trial_num <= 0 {
+                return Err(AppError::Message("app has no trial".into()));
+            }
+            if app_model.trial_num < req.use_count {
+                return Err(AppError::Message(format!(
+                    "device remaining count is not enough: remain={}, required={}",
+                    app_model.trial_num, req.use_count
+                )));
+            }
+            let remain_after = app_model.trial_num - req.use_count;
+            app_devices::ActiveModel {
+                app_id: Set(app_model.id),
+                device_id: Set(req.device_id.clone()),
+                remaining: Set(Some(remain_after)),
+                ..Default::default()
+            }
+            .insert(&tx)
+            .await?;
+            remain_after
+        }
+    };
+
+    create_use_record(
+        &tx,
+        app_model.id,
+        &req.device_id,
+        req.use_count,
+        req.use_info,
+    )
+    .await?;
+
+    tx.commit().await?;
+    Ok(UseCountResp {
+        remain_count: remain_after,
+    })
+}
+
+pub async fn bind_time_reg_code(
+    state: &AppState,
+    app_model: &apps::Model,
+    device_id: &str,
+    device_model: Option<app_devices::Model>,
+    reg_code_model: &reg_codes::Model,
+) -> Result<RegCodeStatusResp, AppError> {
+    if CodeType::from(reg_code_model.code_type) != CodeType::Time {
+        return Err(AppError::Message("code type is not time".into()));
+    }
+
+    let now = Utc::now().fixed_offset();
+    if reg_code_model.device_id.is_some() {
+        ensure_reg_code_bound_to_current_device(device_model.as_ref(), reg_code_model)?;
+        let device_model =
+            device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
+        let expire_time = device_model.expire_time.unwrap_or(now);
+        if expire_time <= now {
+            return Err(AppError::Message("device expired".into()));
+        }
+        return Ok(time_status_resp(expire_time));
+    }
+
+    let tx = state.db.begin().await?;
+    let mut active_reg_model = reg_code_model.clone().into_active_model();
+    active_reg_model.binding_time = Set(Some(now));
+    active_reg_model.status = Set(RegCodeStatus::Binded.into());
+
+    let expire_time = match device_model {
+        Some(device_model) => {
+            let current_expire = device_model.expire_time.unwrap_or(now);
+            let current_expire = if current_expire < now {
+                now
+            } else {
+                current_expire
+            };
+            let new_expire_time =
+                current_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
+
+            active_reg_model.device_id = Set(Some(device_model.id));
+            let mut active_device_model = device_model.into_active_model();
+            active_device_model.expire_time = Set(Some(new_expire_time));
+            active_device_model.update(&tx).await?;
+            new_expire_time
+        }
+        None => {
+            let new_expire_time = now + chrono::Duration::days(reg_code_model.valid_days as i64);
+            let device_active = app_devices::ActiveModel {
+                app_id: Set(app_model.id),
+                device_id: Set(device_id.to_string()),
+                expire_time: Set(Some(new_expire_time)),
+                ..Default::default()
+            };
+            let inserted_device = device_active.insert(&tx).await?;
+            active_reg_model.device_id = Set(Some(inserted_device.id));
+            new_expire_time
+        }
+    };
+
+    active_reg_model.update(&tx).await?;
+    tx.commit().await?;
+    Ok(time_status_resp(expire_time))
+}
+
+pub async fn bind_count_reg_code(
+    state: &AppState,
+    app_model: &apps::Model,
+    device_id: &str,
+    device_model: Option<app_devices::Model>,
+    reg_code_model: &reg_codes::Model,
+) -> Result<RegCodeStatusResp, AppError> {
+    if CodeType::from(reg_code_model.code_type) != CodeType::Count {
+        return Err(AppError::Message("code type is not count".into()));
+    }
+
+    if reg_code_model.device_id.is_some() {
+        ensure_reg_code_bound_to_current_device(device_model.as_ref(), reg_code_model)?;
+        let device_model =
+            device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
+        let remain_count = device_model.remaining.unwrap_or(0);
+        if remain_count <= 0 {
+            return Err(AppError::Message("device remaining count is 0".into()));
+        }
+        return Ok(count_status_resp(remain_count));
+    }
+
+    let total_count = reg_code_model.total_count.unwrap_or(0);
+    if total_count <= 0 {
+        return Err(AppError::Message("reg code remaining count is 0".into()));
+    }
+
+    let now = Utc::now().fixed_offset();
+    let tx = state.db.begin().await?;
+    let mut active_reg_model = reg_code_model.clone().into_active_model();
+    active_reg_model.binding_time = Set(Some(now));
+    active_reg_model.status = Set(RegCodeStatus::Binded.into());
+
+    let remain_count = match device_model {
+        Some(device_model) => {
+            let current_remaining = device_model.remaining.unwrap_or(0);
+            let new_remaining = current_remaining + total_count;
+
+            active_reg_model.device_id = Set(Some(device_model.id));
+            let mut active_device_model = device_model.into_active_model();
+            active_device_model.remaining = Set(Some(new_remaining));
+            active_device_model.update(&tx).await?;
+            new_remaining
+        }
+        None => {
+            let device_active = app_devices::ActiveModel {
+                app_id: Set(app_model.id),
+                device_id: Set(device_id.to_string()),
+                remaining: Set(Some(total_count)),
+                ..Default::default()
+            };
+            let inserted_device = device_active.insert(&tx).await?;
+            active_reg_model.device_id = Set(Some(inserted_device.id));
+            total_count
+        }
+    };
+
+    active_reg_model.update(&tx).await?;
+    tx.commit().await?;
+    Ok(count_status_resp(remain_count))
 }
 
 pub async fn validate_code_impl(

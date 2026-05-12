@@ -60,7 +60,9 @@
     "reg_codes": "注册码",
     "roles": "角色",
     "devices": "设备",
-    "permissions": "权限"
+    "permissions": "权限",
+    "reg_test": "接口测试",
+    "use_records": "使用记录"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -216,6 +218,32 @@
     "user_id": "用户ID",
     "resource": "资源",
     "result": "结果"
+  },
+  "reg_test": {
+    "title": "注册码接口测试",
+    "subtitle": "用于测试客户端接入的绑定、检查和扣次接口。",
+    "bind_title": "绑定注册码",
+    "bind_submit": "绑定",
+    "bind_success": "绑定成功",
+    "check_title": "检查设备",
+    "check_submit": "检查",
+    "check_success": "检查成功",
+    "usecount_title": "扣减次数",
+    "usecount_submit": "扣减",
+    "usecount_success": "扣减成功",
+    "use_count": "使用次数",
+    "use_info": "使用信息",
+    "remain_count": "剩余次数",
+    "empty_result": "暂无结果",
+    "invalid_use_info": "使用信息必须是合法 JSON"
+  },
+  "use_records": {
+    "title": "使用记录",
+    "app": "应用",
+    "device_id": "设备 ID",
+    "use_count": "使用次数",
+    "use_info": "使用信息",
+    "time": "时间"
   },
   "devices": {
     "device_id": "设备ID",

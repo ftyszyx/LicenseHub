@@ -130,6 +130,111 @@ async fn test_count_reg_code_becomes_binded_after_validate() {
 }
 
 #[tokio::test]
+async fn test_count_bind_check_usecount_and_use_records() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let app_key = helpers::unique_name("COUNTAPIKEY");
+    let create_app_body = json!({
+        "name": helpers::unique_name("CountApiApp"),
+        "app_id": helpers::unique_name("com.count.api"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": app_key,
+        "code_type": 1,
+        "trial_num": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_count_api_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let code = helpers::unique_name("COUNTAPICODE");
+    let create_rc = json!({
+        "code": code,
+        "app_id": app_id,
+        "valid_days": 0,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 1,
+        "total_count": 5
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_rc)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_count_api_reg_code").await;
+    assert!(json["success"].as_bool().unwrap());
+
+    let device_id = helpers::unique_name("count-api-dev");
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "bind_count_api_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64().unwrap(), 5);
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/check"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "check_count_api_device").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64().unwrap(), 5);
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/usecount"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "app_key": app_key,
+            "device_id": device_id,
+            "use_count": 2,
+            "use_info": {"case": "test"}
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "use_count_api_device").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64().unwrap(), 3);
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/reg/use_records?app_key={}&device_id={}",
+        app_key, device_id
+    )))
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "public_use_records").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["total"].as_i64().unwrap(), 1);
+    assert_eq!(json["data"]["list"][0]["use_count"].as_i64().unwrap(), 2);
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/admin/use_records/list?app_id={}&device_id={}",
+        app_id, device_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "admin_use_records").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["total"].as_i64().unwrap(), 1);
+}
+
+#[tokio::test]
 async fn test_validate_device_without_code() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;

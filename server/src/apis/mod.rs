@@ -8,4 +8,5 @@ pub mod payment_handler;
 pub mod permission_handler;
 pub mod reg_codes_handler;
 pub mod role_handler;
+pub mod use_record_handler;
 pub mod user_handler;

@@ -13,6 +13,8 @@ import PlansAdminView from '@/views/admin/PlansAdminView.vue'
 import OrdersAdminView from '@/views/admin/OrdersAdminView.vue'
 import PayResultView from '@/views/PayResultView.vue'
 import OrderQueryView from '@/views/OrderQueryView.vue'
+import RegApiTestView from '@/views/admin/RegApiTestView.vue'
+import UseRecordsAdminView from '@/views/admin/UseRecordsAdminView.vue'
 
 import { useAuthStore } from '@/stores/auth'
 import { RouteName, RoutePath } from '@/types'
@@ -103,9 +105,19 @@ const router = createRouter({
                     component: DevicesAdminView
                 },
                 {
-                    path: '/admin/reg_codes',
-                    name: 'admin_reg_codes',
+                    path: RoutePath.AdminRegCodes,
+                    name: RouteName.AdminRegCodes,
                     component: RegCodesAdminView
+                },
+                {
+                    path: RoutePath.AdminRegTest,
+                    name: RouteName.AdminRegTest,
+                    component: RegApiTestView
+                },
+                {
+                    path: RoutePath.AdminUseRecords,
+                    name: RouteName.AdminUseRecords,
+                    component: UseRecordsAdminView
                 },
                 {
                     path: RoutePath.AdminPermissions,
