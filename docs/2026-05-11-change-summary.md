@@ -3,7 +3,7 @@
 ## 彩豆在线支付
 
 - 接入彩豆支付创建订单、异步通知和同步返回。
-- 支持从彩豆商户信息接口查询可用支付方式，并结合 `CAIDOU_PAY_TYPES` 过滤实际展示的支付方式。
+- 支持从彩豆商户信息接口查询可用支付方式，展示结果以彩豆返回的商户信息为准。
 - 支付方式改为购买时选择，不在商品卡片上提前展示。
 - 支付页使用彩豆收银台跳转链接，前端不直接展示原始支付链接。
 - 彩豆 `return_url` 不再停留在后端纯文本接口页，改为跳转到前端 `/pay/result` 支付结果页。
@@ -67,7 +67,6 @@
   - `CAIDOU_BASE_URL`
   - `CAIDOU_PID`
   - `CAIDOU_KEY`
-  - `CAIDOU_PAY_TYPES`
   - `PUBLIC_BASE_URL`
   - `FRONTEND_BASE_URL`
   - `PAYMENT_SITE_NAME`

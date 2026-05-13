@@ -1,1 +1,0 @@
-import{_ as o,c,a as t,t as s,o as a}from"./index-DJYUR2o1.js";const n={},r={class:"flex flex-col items-center justify-center text-center py-20"},l={class:"text-4xl font-bold"},i={class:"text-lg text-gray-600 mt-4"};function _(e,f){return a(),c("div",r,[t("h1",l,s(e.$t("home.title")),1),t("p",i,s(e.$t("home.subtitle")),1)])}const m=o(n,[["render",_]]);export{m as default};

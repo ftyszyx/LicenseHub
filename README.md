@@ -42,20 +42,21 @@ admin: 前端代码
 
 server: 后端rust代码
 
-pub: 服务器部署相关
-
 ## 本地测试
-
-### 启动服务器
-
-需要有redis和postgres环境
-数据库文件在pub/deploy/postgres/init.sql
-初始账号密码：admin/admin
 
 #### 先配置环境变量
 
 修改.env.example为.env
 配置其中的参数
+
+### 准备数据库和redis环境
+
+需要有redis和postgres环境: 可以  使用docker-compose.test一键部署
+```
+docker-compose -f docker-compose.test.yml up -d
+```
+初始账号密码：admin/admin
+
 
 #### 启动后端
 
@@ -65,7 +66,6 @@ pub: 服务器部署相关
 cd server
 sqlx migrate run --database-url postgres://test:123456@localhost:5432/hub
 ```
-
 ```
 
 cd server
@@ -84,51 +84,11 @@ npm run dev
 
 ```
 
-## 服务器部署
-
-切到pub目录下
-
-需要有docker 环境
-
-### 修改环境变量
-
-修改.env.example为.env
-配置其中的参数
-
 ### 启动服务器
 
 ```
-
 cd pub
 update_server.sh
-
-```
-
-### 启动前端
-
-需要nginx配置
-
-```
-
-location / {
-try_files $uri $uri/ /index.html;
-}
-
-```
-
-编译生成对应的前端资源
-
-```
-
-python build_web.py --base-url {your server_url}
-
-```
-
-将目录下的资源同步到网站目录即可
-
-```
-
-rsync -avz web/ /opt/1panel/www/sites/index/
 
 ```
 
