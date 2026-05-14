@@ -209,14 +209,8 @@ pub fn create_router(app_state: AppState) -> Service {
         .push(Router::with_path("/api/orders").post(apis::payment_handler::create_order))
         .push(Router::with_path("/api/orders/{order_no}").get(apis::payment_handler::get_order))
         .push(
-            Router::with_path("/api/pay/caidou/notify")
-                .get(apis::payment_handler::caidou_notify)
-                .post(apis::payment_handler::caidou_notify),
-        )
-        .push(
-            Router::with_path("/api/pay/caidou/return")
-                .get(apis::payment_handler::caidou_return)
-                .post(apis::payment_handler::caidou_return),
+            Router::with_path("/api/pay/wechat/native/notify")
+                .post(apis::payment_handler::wechat_native_notify),
         )
         .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
         .push(

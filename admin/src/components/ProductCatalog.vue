@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { toDataURL } from 'qrcode'
 import { createOrder, fetchOrder, fetchPayMethods, fetchPublicPlans } from '@/apis/payments'
 import type { LicensePlan, OrderModel, PayMethodInfo, PayMethodsInfo } from '@/types/payments'
 import { OrderStatus } from '@/types/payments'
@@ -32,6 +33,7 @@ const payType = ref('')
 const payMethodsInfo = ref<PayMethodsInfo | null>(null)
 const payMethodsLoading = ref(false)
 const activeAppKey = ref('')
+const activeQrCodeDataUrl = ref('')
 let pollTimer: number | undefined
 
 const appGroups = computed<AppPlanGroup[]>(() => {
@@ -63,7 +65,12 @@ const visiblePlans = computed(() => {
 
 const activePayUrl = computed(() => {
   const order = activeOrder.value
-  return order?.pay_url || order?.qr_code || order?.url_scheme || ''
+  return order?.pay_url || order?.url_scheme || ''
+})
+
+const activeQrCode = computed(() => {
+  const order = activeOrder.value
+  return order?.pay_type === 'wechat_native' ? order?.qr_code || '' : ''
 })
 
 const orderDialogVisible = computed({
@@ -137,7 +144,7 @@ async function confirmBuy() {
   const plan = selectedPlan.value
   if (!plan || !payType.value) return
   creatingId.value = plan.id
-  const payWindow = window.open('', '_blank')
+  const payWindow = payType.value === 'wechat_native' ? null : window.open('', '_blank')
   try {
     activeOrder.value = await createOrder({ plan_id: plan.id, pay_type: payType.value })
     checkoutDialogVisible.value = false
@@ -165,8 +172,14 @@ function startPolling() {
   if (!activeOrder.value) return
   pollTimer = window.setInterval(async () => {
     if (!activeOrder.value) return
+    const currentOrder = activeOrder.value
     const latest = await fetchOrder(activeOrder.value.order_no)
-    activeOrder.value = latest
+    activeOrder.value = {
+      ...latest,
+      pay_url: latest.pay_url || currentOrder.pay_url,
+      qr_code: latest.qr_code || currentOrder.qr_code,
+      url_scheme: latest.url_scheme || currentOrder.url_scheme,
+    }
     if (latest.status === OrderStatus.Delivered) {
       stopPolling()
       ElMessage.success('支付已完成')
@@ -209,6 +222,12 @@ function selectPayMethod(method: PayMethodInfo) {
 }
 
 function payMethodMeta(method: PayMethodInfo) {
+  if (method.pay_type === 'wechat_native') {
+    return {
+      name: method.label || '微信支付',
+      icon: '/static/images/pay/wxpay.png',
+    }
+  }
   if (method.pay_type === 'alipay') {
     return {
       name: method.label || '支付宝',
@@ -240,6 +259,18 @@ function payMethodMeta(method: PayMethodInfo) {
 }
 
 watch(() => props.appId, loadPlans, { immediate: true })
+
+watch(activeQrCode, async (code) => {
+  if (!code) {
+    activeQrCodeDataUrl.value = ''
+    return
+  }
+  activeQrCodeDataUrl.value = await toDataURL(code, {
+    width: 240,
+    margin: 1,
+    errorCorrectionLevel: 'M',
+  })
+})
 
 watch(appGroups, (groups) => {
   if (!props.grouped || groups.length === 0) return
@@ -401,6 +432,16 @@ onBeforeUnmount(stopPolling)
             <el-descriptions-item label="金额">&yen;{{ formatPrice(activeOrder.amount_cents) }}</el-descriptions-item>
             <el-descriptions-item label="状态">{{ orderStatusLabel(activeOrder.status) }}</el-descriptions-item>
           </el-descriptions>
+
+          <div v-if="activeQrCodeDataUrl && activeOrder.status !== OrderStatus.Delivered" class="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+            <div class="flex flex-col items-center gap-3 text-center">
+              <img :src="activeQrCodeDataUrl" alt="微信支付二维码" class="h-60 w-60 rounded bg-white p-2 shadow-sm">
+              <div>
+                <div class="text-sm font-medium text-slate-900">使用微信扫一扫付款</div>
+                <p class="mt-1 text-sm text-slate-600">付款完成后订单会自动刷新并发放注册码。</p>
+              </div>
+            </div>
+          </div>
 
           <div v-if="activePayUrl && activeOrder.status !== OrderStatus.Delivered" class="rounded-lg border border-blue-100 bg-blue-50 p-4">
             <div class="text-sm font-medium text-slate-900">支付页面已打开</div>

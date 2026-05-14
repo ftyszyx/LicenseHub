@@ -27,7 +27,7 @@ CREATE TABLE "orders" (
     "amount_cents" INTEGER NOT NULL,
     "pay_type" VARCHAR(32) NOT NULL,
     "status" SMALLINT NOT NULL DEFAULT 0,
-    "provider" VARCHAR(32) NOT NULL DEFAULT 'caidou',
+    "provider" VARCHAR(32) NOT NULL DEFAULT 'wechat',
     "provider_trade_no" VARCHAR(128),
     "pay_url" TEXT,
     "qr_code" TEXT,

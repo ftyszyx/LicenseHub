@@ -86,6 +86,7 @@ export interface CreateOrderReq {
 export interface PayMethodInfo {
   pay_type: string
   label: string
+  provider: string
   enabled: boolean
 }
 

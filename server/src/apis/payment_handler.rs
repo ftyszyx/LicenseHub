@@ -5,7 +5,9 @@ use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
 use chrono::Utc;
 use data_model::{apps, license_plans, order_events, orders, reg_codes};
-use salvo::http::Method;
+use payment_adapter::{
+    CreatePaymentRequest, PaymentError, PaymentHeaders, PaymentNotification, PaymentStatus,
+};
 use salvo::oapi::extract::JsonBody;
 use salvo::prelude::*;
 use salvo_oapi::extract::PathParam;
@@ -16,11 +18,11 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::BTreeMap;
 use uuid::Uuid;
 use validator::Validate;
 
-const PROVIDER_CAIDOU: &str = "caidou";
+const PROVIDER_WECHAT: &str = "wechat";
+const PAY_TYPE_WECHAT_NATIVE: &str = "wechat_native";
 const ORDER_EVENT_PAYMENT_DELIVERED: &str = "payment.delivered";
 const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
 
@@ -274,41 +276,11 @@ impl
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct CaidouNotify {
-    pub pid: String,
-    pub trade_no: String,
-    pub out_trade_no: String,
-    #[serde(rename = "type")]
-    pub pay_type: String,
-    pub name: String,
-    pub money: String,
-    pub trade_status: String,
-    pub param: Option<String>,
-    pub sign: String,
-    pub sign_type: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct CaidouMapiResp {
-    code: i32,
-    msg: Option<String>,
-    trade_no: Option<String>,
-    payurl: Option<String>,
-    qrcode: Option<String>,
-    urlscheme: Option<String>,
-    money: Option<String>,
-}
-
-struct CaidouPaymentRequest {
-    params: BTreeMap<String, String>,
-    submit_url: String,
-}
-
 #[derive(Debug, Serialize)]
 pub struct PayMethodInfo {
     pub pay_type: String,
     pub label: String,
+    pub provider: String,
     pub enabled: bool,
 }
 
@@ -466,53 +438,43 @@ pub async fn update_plan_impl(
 }
 
 async fn fetch_pay_methods_impl(state: &AppState) -> PayMethodsInfo {
-    let cfg = &state.config.caidou_pay;
+    let cfg = &state.config.payment;
     if !cfg.enabled {
         return PayMethodsInfo {
             enabled: false,
-            provider: PROVIDER_CAIDOU.to_string(),
+            provider: "adapter".to_string(),
             merchant_active: false,
             methods: Vec::new(),
             message: Some("payment is disabled".to_string()),
         };
     }
-    if cfg.pid.is_empty() || cfg.key.is_empty() {
+    if state.payment_registry.is_empty() {
         return PayMethodsInfo {
             enabled: false,
-            provider: PROVIDER_CAIDOU.to_string(),
+            provider: "adapter".to_string(),
             merchant_active: false,
             methods: Vec::new(),
-            message: Some("CAIDOU_PID and CAIDOU_KEY must be set".to_string()),
+            message: Some("no payment adapter is configured".to_string()),
         };
     }
 
-    match request_caidou_merchant_info(state).await {
-        Ok(info) => {
-            let merchant_active = json_value_is_active(info.get("active"));
-            let methods = if merchant_active {
-                resolve_pay_methods_from_merchant_info(&info, &cfg.pay_types)
-            } else {
-                Vec::new()
-            };
-            PayMethodsInfo {
-                enabled: merchant_active && !methods.is_empty(),
-                provider: PROVIDER_CAIDOU.to_string(),
-                merchant_active,
-                methods,
-                message: if merchant_active {
-                    None
-                } else {
-                    Some("merchant is inactive".to_string())
-                },
-            }
-        }
-        Err(error) => PayMethodsInfo {
-            enabled: false,
-            provider: PROVIDER_CAIDOU.to_string(),
-            merchant_active: false,
-            methods: Vec::new(),
-            message: Some(error.to_string()),
-        },
+    let methods = state
+        .payment_registry
+        .methods()
+        .into_iter()
+        .map(|method| PayMethodInfo {
+            pay_type: method.pay_type,
+            label: method.label,
+            provider: method.provider,
+            enabled: true,
+        })
+        .collect::<Vec<_>>();
+    PayMethodsInfo {
+        enabled: !methods.is_empty(),
+        provider: "adapter".to_string(),
+        merchant_active: true,
+        methods,
+        message: None,
     }
 }
 
@@ -592,6 +554,7 @@ pub async fn create_order_impl(
     client_ip: Option<String>,
 ) -> Result<OrderInfo, AppError> {
     let pay_type = normalize_pay_type(&req.pay_type)?;
+    let provider = provider_for_pay_type(&pay_type)?;
     let plan = license_plans::Entity::find_by_id(req.plan_id)
         .one(&state.db)
         .await?
@@ -618,21 +581,36 @@ pub async fn create_order_impl(
         amount_cents: Set(plan.price_cents),
         pay_type: Set(pay_type.clone()),
         status: Set(i16::from(OrderStatus::Pending)),
-        provider: Set(PROVIDER_CAIDOU.to_string()),
-        client_ip: Set(client_ip),
+        provider: Set(provider.to_string()),
+        client_ip: Set(client_ip.clone()),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
     };
 
-    if state.config.caidou_pay.enabled {
-        let pay_req = build_caidou_payment_request(state, &plan, &order_no, &pay_type)?;
-        let pay_resp = request_caidou_payment(state, &pay_req.params).await?;
-        active.provider_trade_no = Set(pay_resp.trade_no.clone());
-        active.pay_url = Set(Some(pay_req.submit_url));
-        active.qr_code = Set(pay_resp.qrcode.clone());
-        active.url_scheme = Set(pay_resp.urlscheme.clone());
-        active.provider_payload = Set(Some(json!(&pay_resp)));
+    if state.config.payment.enabled {
+        let adapter = state
+            .payment_registry
+            .get(&pay_type)
+            .map_err(payment_error)?;
+        let pay_resp = adapter
+            .create_payment(CreatePaymentRequest {
+                out_trade_no: order_no.clone(),
+                subject: plan.name.clone(),
+                amount_cents: plan.price_cents,
+                notify_url: notify_url_for_pay_type(state, &pay_type)?,
+                client_ip,
+                attach: Some(plan.id.to_string()),
+            })
+            .await
+            .map_err(payment_error)?;
+        active.provider = Set(pay_resp.provider);
+        active.pay_type = Set(pay_resp.pay_type);
+        active.provider_trade_no = Set(pay_resp.provider_trade_no);
+        active.pay_url = Set(pay_resp.pay_url);
+        active.qr_code = Set(pay_resp.qr_code);
+        active.url_scheme = Set(pay_resp.url_scheme);
+        active.provider_payload = Set(Some(pay_resp.raw_payload));
     }
 
     let inserted = active.insert(&state.db).await?;
@@ -715,63 +693,74 @@ async fn build_order_info(
 }
 
 #[handler]
-pub async fn caidou_notify(
-    depot: &mut Depot,
-    req: &mut Request,
-    res: &mut Response,
-) -> Result<(), AppError> {
+pub async fn wechat_native_notify(depot: &mut Depot, req: &mut Request, res: &mut Response) {
     let state = depot.obtain::<AppState>().unwrap();
-    let notify = parse_notify(req).await?;
-    process_caidou_notify(state, notify).await?;
-    res.render(Text::Plain("success"));
-    Ok(())
-}
-
-#[handler]
-pub async fn caidou_return(
-    depot: &mut Depot,
-    req: &mut Request,
-    res: &mut Response,
-) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
-    let notify = parse_notify(req).await?;
-    let order_no = notify.out_trade_no.clone();
-    let result = match process_caidou_notify(state, notify).await {
-        Ok(_) => "success",
-        Err(error) => {
-            tracing::error!("Caidou return processing failed: {}", error);
-            "failed"
+    let result = handle_payment_notify(state, PAY_TYPE_WECHAT_NATIVE, req).await;
+    match result {
+        Ok(_) => {
+            res.status_code(StatusCode::OK);
+            res.render(Json(json!({
+                "code": "SUCCESS",
+                "message": "成功"
+            })));
         }
-    };
-    let redirect_url = format!(
-        "{}/pay/result?order_no={}&result={}",
-        state.config.caidou_pay.frontend_base_url,
-        url_encode(&order_no),
-        result
-    );
-    res.render(Redirect::other(redirect_url));
-    Ok(())
+        Err(error) => {
+            tracing::error!("WeChat Native payment notification failed: {}", error);
+            res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
+            res.render(Json(json!({
+                "code": "FAIL",
+                "message": error.to_string()
+            })));
+        }
+    }
 }
 
-pub async fn process_caidou_notify(
+async fn handle_payment_notify(
     state: &AppState,
-    notify: CaidouNotify,
+    pay_type: &str,
+    req: &mut Request,
 ) -> Result<OrderInfo, AppError> {
-    verify_notify(state, &notify)?;
-    if notify.trade_status != "TRADE_SUCCESS" {
+    let adapter = state
+        .payment_registry
+        .get(pay_type)
+        .map_err(payment_error)?;
+    let headers = collect_payment_headers(req);
+    let body = req
+        .payload_with_max_size(1024 * 1024)
+        .await
+        .map_err(|error| AppError::Message(format!("failed to read payment notify: {}", error)))?;
+    let notification = adapter
+        .parse_notification(&headers, body.as_ref())
+        .await
+        .map_err(payment_error)?;
+    process_payment_notification(state, notification).await
+}
+
+pub async fn process_payment_notification(
+    state: &AppState,
+    notification: PaymentNotification,
+) -> Result<OrderInfo, AppError> {
+    if notification.status != PaymentStatus::Success {
         return Err(AppError::business_logic(
             "PAYMENT_NOT_SUCCESS",
-            "trade_status is not TRADE_SUCCESS",
+            "payment notification is not success",
         ));
     }
 
     let tx = state.db.begin().await?;
     let order = orders::Entity::find()
-        .filter(orders::Column::OrderNo.eq(notify.out_trade_no.clone()))
+        .filter(orders::Column::OrderNo.eq(notification.out_trade_no.clone()))
         .lock_exclusive()
         .one(&tx)
         .await?
         .ok_or_else(|| AppError::not_found("orders", None))?;
+
+    if notification.provider != order.provider || notification.pay_type != order.pay_type {
+        return Err(AppError::business_logic(
+            "PAYMENT_PROVIDER_MISMATCH",
+            "payment notification provider does not match order",
+        ));
+    }
 
     if OrderStatus::from(order.status) == OrderStatus::Delivered {
         if let Some(reg_code_id) = order.reg_code_id {
@@ -791,11 +780,10 @@ pub async fn process_caidou_notify(
                 .await?;
         }
         tx.commit().await?;
-        return get_order_by_no_impl(state, &notify.out_trade_no).await;
+        return get_order_by_no_impl(state, &notification.out_trade_no).await;
     }
 
-    let amount_cents = money_to_cents(&notify.money)?;
-    if amount_cents != order.amount_cents {
+    if notification.amount_cents != order.amount_cents {
         return Err(AppError::business_logic(
             "AMOUNT_MISMATCH",
             "payment amount does not match order amount",
@@ -811,9 +799,9 @@ pub async fn process_caidou_notify(
     let now = Utc::now().fixed_offset();
     let mut active = order.into_active_model();
     active.status = Set(i16::from(OrderStatus::Delivered));
-    active.provider_trade_no = Set(Some(notify.trade_no.clone()));
+    active.provider_trade_no = Set(notification.provider_trade_no.clone());
     active.reg_code_id = Set(Some(reg_code.id));
-    active.provider_payload = Set(Some(json!(notify)));
+    active.provider_payload = Set(Some(notification.raw_payload.clone()));
     active.paid_at = Set(Some(now));
     active.updated_at = Set(now);
     let updated_order = active.update(&tx).await?;
@@ -822,8 +810,9 @@ pub async fn process_caidou_notify(
         &updated_order,
         ORDER_EVENT_PAYMENT_DELIVERED,
         json!({
-            "provider": PROVIDER_CAIDOU,
-            "provider_trade_no": notify.trade_no,
+            "provider": notification.provider,
+            "pay_type": notification.pay_type,
+            "provider_trade_no": notification.provider_trade_no,
             "reg_code_id": reg_code.id,
         }),
     )
@@ -831,7 +820,7 @@ pub async fn process_caidou_notify(
     notify_order_event(&tx, event.id).await?;
     tx.commit().await?;
 
-    get_order_by_no_impl(state, &notify.out_trade_no).await
+    get_order_by_no_impl(state, &notification.out_trade_no).await
 }
 
 async fn create_order_event(
@@ -865,244 +854,6 @@ async fn notify_order_event(tx: &DatabaseTransaction, event_id: i64) -> Result<(
     ))
     .await?;
     Ok(())
-}
-
-async fn parse_notify(req: &mut Request) -> Result<CaidouNotify, AppError> {
-    if req.method() == Method::GET {
-        return Ok(req.parse_queries::<CaidouNotify>()?);
-    }
-    Ok(req.parse_body::<CaidouNotify>().await?)
-}
-
-fn verify_notify(state: &AppState, notify: &CaidouNotify) -> Result<(), AppError> {
-    let mut params = BTreeMap::new();
-    params.insert("money".to_string(), notify.money.clone());
-    params.insert("name".to_string(), notify.name.clone());
-    if let Some(param) = &notify.param {
-        params.insert("param".to_string(), param.clone());
-    }
-    params.insert("out_trade_no".to_string(), notify.out_trade_no.clone());
-    params.insert("pid".to_string(), notify.pid.clone());
-    params.insert("trade_no".to_string(), notify.trade_no.clone());
-    params.insert("trade_status".to_string(), notify.trade_status.clone());
-    params.insert("type".to_string(), notify.pay_type.clone());
-    let expected = caidou_sign(&params, &state.config.caidou_pay.key);
-    if expected != notify.sign.to_ascii_lowercase() {
-        return Err(AppError::business_logic(
-            "INVALID_SIGN",
-            "payment notification signature is invalid",
-        ));
-    }
-    if notify.pid != state.config.caidou_pay.pid {
-        return Err(AppError::business_logic(
-            "INVALID_PID",
-            "payment notification merchant id is invalid",
-        ));
-    }
-    Ok(())
-}
-
-fn build_caidou_payment_request(
-    state: &AppState,
-    plan: &license_plans::Model,
-    order_no: &str,
-    pay_type: &str,
-) -> Result<CaidouPaymentRequest, AppError> {
-    let cfg = &state.config.caidou_pay;
-    if cfg.pid.is_empty() || cfg.key.is_empty() {
-        return Err(AppError::validation(
-            "CAIDOU_PID and CAIDOU_KEY must be set",
-        ));
-    }
-    let mut params = BTreeMap::new();
-    params.insert("pid".to_string(), cfg.pid.clone());
-    params.insert("type".to_string(), pay_type.to_string());
-    params.insert("out_trade_no".to_string(), order_no.to_string());
-    params.insert(
-        "notify_url".to_string(),
-        format!("{}/api/pay/caidou/notify", cfg.public_base_url),
-    );
-    params.insert(
-        "return_url".to_string(),
-        format!("{}/api/pay/caidou/return", cfg.public_base_url),
-    );
-    params.insert("name".to_string(), plan.name.clone());
-    params.insert("money".to_string(), cents_to_money(plan.price_cents));
-    params.insert("sitename".to_string(), cfg.site_name.clone());
-    params.insert("param".to_string(), plan.id.to_string());
-    params.insert("device".to_string(), "pc".to_string());
-    let sign = caidou_sign(&params, &cfg.key);
-    params.insert("sign".to_string(), sign);
-    params.insert("sign_type".to_string(), "MD5".to_string());
-
-    Ok(CaidouPaymentRequest {
-        submit_url: caidou_submit_url(cfg.base_url.as_str(), &params),
-        params,
-    })
-}
-
-async fn request_caidou_payment(
-    state: &AppState,
-    params: &BTreeMap<String, String>,
-) -> Result<CaidouMapiResp, AppError> {
-    let cfg = &state.config.caidou_pay;
-    let url = format!("{}/xpay/epay/mapi.php", cfg.base_url);
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| AppError::ExternalService {
-            service: "caidou".to_string(),
-            error: e.to_string(),
-        })?;
-    let status = resp.status();
-    let parsed = resp
-        .json::<CaidouMapiResp>()
-        .await
-        .map_err(|e| AppError::ExternalService {
-            service: "caidou".to_string(),
-            error: format!("invalid response {}: {}", status, e),
-        })?;
-    if parsed.code != 1 {
-        return Err(AppError::ExternalService {
-            service: "caidou".to_string(),
-            error: parsed
-                .msg
-                .clone()
-                .unwrap_or_else(|| "payment request failed".to_string()),
-        });
-    }
-    Ok(parsed)
-}
-
-async fn request_caidou_merchant_info(
-    state: &AppState,
-) -> Result<serde_json::Map<String, serde_json::Value>, AppError> {
-    let cfg = &state.config.caidou_pay;
-    let url = format!("{}/xpay/epay/api.php", cfg.base_url);
-    let resp = reqwest::Client::new()
-        .get(&url)
-        .query(&[
-            ("act", "query"),
-            ("pid", cfg.pid.as_str()),
-            ("key", cfg.key.as_str()),
-        ])
-        .send()
-        .await
-        .map_err(|e| AppError::ExternalService {
-            service: "caidou".to_string(),
-            error: e.to_string(),
-        })?;
-    let status = resp.status();
-    let parsed = resp
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| AppError::ExternalService {
-            service: "caidou".to_string(),
-            error: format!("invalid merchant info response {}: {}", status, e),
-        })?;
-    parsed
-        .as_object()
-        .cloned()
-        .ok_or_else(|| AppError::ExternalService {
-            service: "caidou".to_string(),
-            error: "merchant info response is not an object".to_string(),
-        })
-}
-
-fn resolve_pay_methods_from_merchant_info(
-    info: &serde_json::Map<String, serde_json::Value>,
-    configured_pay_types: &[String],
-) -> Vec<PayMethodInfo> {
-    let mut methods = Vec::new();
-    for (pay_type, label) in [
-        ("alipay", "支付宝"),
-        ("wxpay", "微信"),
-        ("qqpay", "QQ钱包"),
-        ("bank", "网银"),
-        ("jdpay", "京东支付"),
-    ] {
-        if !configured_pay_types.is_empty()
-            && !configured_pay_types.iter().any(|item| item == pay_type)
-        {
-            continue;
-        }
-        if configured_pay_types.iter().any(|item| item == pay_type)
-            || merchant_info_supports_pay_type(info, pay_type)
-        {
-            methods.push(PayMethodInfo {
-                pay_type: pay_type.to_string(),
-                label: label.to_string(),
-                enabled: true,
-            });
-        }
-    }
-    if methods.is_empty() && configured_pay_types.is_empty() {
-        methods.push(PayMethodInfo {
-            pay_type: "alipay".to_string(),
-            label: "支付宝".to_string(),
-            enabled: true,
-        });
-        methods.push(PayMethodInfo {
-            pay_type: "wxpay".to_string(),
-            label: "微信".to_string(),
-            enabled: true,
-        });
-    }
-    methods
-}
-
-fn merchant_info_supports_pay_type(
-    info: &serde_json::Map<String, serde_json::Value>,
-    pay_type: &str,
-) -> bool {
-    let aliases = match pay_type {
-        "alipay" => ["alipay", "ali", "alipay_open", "alipay_status"],
-        "wxpay" => ["wxpay", "wechat", "weixin", "wxpay_status"],
-        "qqpay" => ["qqpay", "qq", "qqpay_status", "tenpay"],
-        "bank" => ["bank", "bankpay", "unionpay", "bank_status"],
-        "jdpay" => ["jdpay", "jd", "jdpay_status", "jingdong"],
-        _ => [pay_type, pay_type, pay_type, pay_type],
-    };
-    aliases
-        .iter()
-        .filter_map(|key| info.get(*key))
-        .any(|value| json_value_is_active(Some(value)))
-        || info
-            .get("paytype")
-            .or_else(|| info.get("pay_type"))
-            .or_else(|| info.get("pay_types"))
-            .or_else(|| info.get("channels"))
-            .is_some_and(|value| json_value_contains_pay_type(value, pay_type))
-}
-
-fn json_value_contains_pay_type(value: &serde_json::Value, pay_type: &str) -> bool {
-    match value {
-        serde_json::Value::String(text) => text
-            .split(|c: char| c == ',' || c == '|' || c == ';' || c.is_whitespace())
-            .any(|part| part.eq_ignore_ascii_case(pay_type)),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .any(|item| json_value_contains_pay_type(item, pay_type)),
-        serde_json::Value::Object(map) => map
-            .get(pay_type)
-            .is_some_and(|enabled| json_value_is_active(Some(enabled))),
-        _ => false,
-    }
-}
-
-fn json_value_is_active(value: Option<&serde_json::Value>) -> bool {
-    match value {
-        Some(serde_json::Value::Bool(v)) => *v,
-        Some(serde_json::Value::Number(v)) => v.as_i64().unwrap_or_default() > 0,
-        Some(serde_json::Value::String(v)) => matches!(
-            v.to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on" | "enable" | "enabled" | "active" | "normal"
-        ),
-        Some(serde_json::Value::Null) | None => true,
-        _ => false,
-    }
 }
 
 async fn create_paid_reg_code(
@@ -1163,41 +914,43 @@ async fn ensure_plan_matches_app(
     Ok(())
 }
 
-pub fn caidou_sign(params: &BTreeMap<String, String>, key: &str) -> String {
-    let pairs: Vec<String> = params
-        .iter()
-        .filter(|(k, v)| !v.is_empty() && k.as_str() != "sign" && k.as_str() != "sign_type")
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect();
-    format!("{:x}", md5::compute(format!("{}{}", pairs.join("&"), key)))
-}
-
-fn caidou_submit_url(base_url: &str, params: &BTreeMap<String, String>) -> String {
-    let query = params
-        .iter()
-        .map(|(key, value)| format!("{}={}", url_encode(key), url_encode(value)))
-        .collect::<Vec<_>>()
-        .join("&");
-    format!("{}/xpay/epay/submit.php?{}", base_url, query)
-}
-
-fn url_encode(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
-            }
-            b' ' => encoded.push_str("%20"),
-            _ => encoded.push_str(&format!("%{:02X}", byte)),
+fn collect_payment_headers(req: &Request) -> PaymentHeaders {
+    let mut headers = PaymentHeaders::new();
+    for (name, value) in req.headers() {
+        if let Ok(value) = value.to_str() {
+            headers.insert(name.as_str().to_ascii_lowercase(), value.to_string());
         }
     }
-    encoded
+    headers
+}
+
+fn payment_error(error: PaymentError) -> AppError {
+    AppError::ExternalService {
+        service: "payment".to_string(),
+        error: error.to_string(),
+    }
+}
+
+fn notify_url_for_pay_type(state: &AppState, pay_type: &str) -> Result<String, AppError> {
+    match pay_type {
+        PAY_TYPE_WECHAT_NATIVE => Ok(format!(
+            "{}/api/pay/wechat/native/notify",
+            state.config.payment.public_base_url
+        )),
+        _ => Err(AppError::validation("pay_type is not supported")),
+    }
+}
+
+fn provider_for_pay_type(pay_type: &str) -> Result<&'static str, AppError> {
+    match pay_type {
+        PAY_TYPE_WECHAT_NATIVE => Ok(PROVIDER_WECHAT),
+        _ => Err(AppError::validation("pay_type is not supported")),
+    }
 }
 
 fn normalize_pay_type(pay_type: &str) -> Result<String, AppError> {
     match pay_type {
-        "alipay" | "wxpay" | "qqpay" | "bank" | "jdpay" => Ok(pay_type.to_string()),
+        PAY_TYPE_WECHAT_NATIVE => Ok(pay_type.to_string()),
         _ => Err(AppError::validation("pay_type is not supported")),
     }
 }
@@ -1218,52 +971,4 @@ fn short_id(len: usize) -> String {
         .take(len)
         .map(|c| c.to_ascii_uppercase())
         .collect()
-}
-
-fn cents_to_money(cents: i32) -> String {
-    format!("{}.{:02}", cents / 100, (cents % 100).abs())
-}
-
-fn money_to_cents(value: &str) -> Result<i32, AppError> {
-    let mut parts = value.split('.');
-    let yuan = parts
-        .next()
-        .unwrap_or("0")
-        .parse::<i32>()
-        .map_err(|_| AppError::validation("invalid money"))?;
-    let cents_str = parts.next().unwrap_or("0");
-    let cents = match cents_str.len() {
-        0 => 0,
-        1 => cents_str.parse::<i32>().unwrap_or(0) * 10,
-        _ => cents_str[..2].parse::<i32>().unwrap_or(0),
-    };
-    Ok(yuan * 100 + cents)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_caidou_sign() {
-        let mut params = BTreeMap::new();
-        params.insert("pid".to_string(), "1000".to_string());
-        params.insert("type".to_string(), "alipay".to_string());
-        params.insert("out_trade_no".to_string(), "20240101123456".to_string());
-        params.insert("name".to_string(), "test".to_string());
-        params.insert("money".to_string(), "100.00".to_string());
-        params.insert("sign_type".to_string(), "MD5".to_string());
-        params.insert("empty".to_string(), "".to_string());
-        let actual = caidou_sign(&params, "secret");
-        let raw = "money=100.00&name=test&out_trade_no=20240101123456&pid=1000&type=alipaysecret";
-        assert_eq!(actual, format!("{:x}", md5::compute(raw)));
-    }
-
-    #[test]
-    fn test_money_to_cents() {
-        assert_eq!(money_to_cents("1").unwrap(), 100);
-        assert_eq!(money_to_cents("1.2").unwrap(), 120);
-        assert_eq!(money_to_cents("1.23").unwrap(), 123);
-        assert_eq!(cents_to_money(123), "1.23");
-    }
 }

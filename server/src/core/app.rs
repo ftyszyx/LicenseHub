@@ -2,6 +2,7 @@ use crate::core::config::*;
 use crate::core::my_error::*;
 use crate::core::redis_cache::RedisCache;
 use chrono::{FixedOffset, Utc};
+use payment_adapter::{PaymentRegistry, WechatNativeAdapter, WechatNativeConfig};
 use sea_orm::{ConnectOptions, Database, DatabaseConnection, DbErr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub redis: Arc<RedisCache>,
     pub config: Arc<Config>,
+    pub payment_registry: Arc<PaymentRegistry>,
 }
 
 impl FormatTime for East8Timer {
@@ -45,14 +47,48 @@ pub async fn init_app() -> Result<AppState, AppError> {
     )
     .map_err(|e| AppError::Message(format!("redis connection failed:{}", e)))?;
     tracing::info!("Redis connected successfully");
+    let payment_registry = init_payment_registry(&config)?;
     // 创建应用状态
     let app_state = AppState {
         db: db_pool,
         redis: Arc::new(redis),
         config: Arc::new(config),
+        payment_registry: Arc::new(payment_registry),
     };
     // 创建路由
     Ok(app_state)
+}
+
+fn init_payment_registry(config: &Config) -> Result<PaymentRegistry, AppError> {
+    let mut registry = PaymentRegistry::new();
+    if !config.payment.enabled {
+        return Ok(registry);
+    }
+
+    let enabled_types = &config.payment.pay_types;
+    let wechat_enabled = config.payment.wechat_native.enabled
+        && (enabled_types.is_empty()
+            || enabled_types
+                .iter()
+                .any(|pay_type| pay_type == "wechat_native"));
+    if wechat_enabled {
+        let cfg = &config.payment.wechat_native;
+        let adapter = WechatNativeAdapter::new(WechatNativeConfig {
+            app_id: cfg.app_id.clone(),
+            mch_id: cfg.mch_id.clone(),
+            merchant_serial_no: cfg.merchant_serial_no.clone(),
+            merchant_private_key_pem: cfg.merchant_private_key_pem.clone(),
+            api_v3_key: cfg.api_v3_key.clone(),
+            platform_public_key_pem: cfg.platform_public_key_pem.clone(),
+            api_base_url: cfg.api_base_url.clone(),
+        })
+        .map_err(|error| {
+            AppError::Message(format!("failed to initialize WeChat Native pay: {}", error))
+        })?;
+        registry.register(adapter);
+    }
+
+    Ok(registry)
 }
 
 pub async fn init_db(config: &DatabaseConfig) -> Result<DatabaseConnection, DbErr> {

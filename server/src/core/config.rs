@@ -7,7 +7,7 @@ pub struct Config {
     pub redis: RedisConfig,
     pub jwt: JwtConfig,
     pub server: ServerConfig,
-    pub caidou_pay: CaidouPayConfig,
+    pub payment: PaymentConfig,
     pub register_open: bool,
 }
 
@@ -46,15 +46,25 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct CaidouPayConfig {
+pub struct PaymentConfig {
     pub enabled: bool,
-    pub base_url: String,
-    pub pid: String,
-    pub key: String,
     pub pay_types: Vec<String>,
     pub public_base_url: String,
     pub frontend_base_url: String,
     pub site_name: String,
+    pub wechat_native: WechatNativePayConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct WechatNativePayConfig {
+    pub enabled: bool,
+    pub app_id: String,
+    pub mch_id: String,
+    pub merchant_serial_no: String,
+    pub merchant_private_key_pem: String,
+    pub api_v3_key: String,
+    pub platform_public_key_pem: Option<String>,
+    pub api_base_url: String,
 }
 
 impl Config {
@@ -64,7 +74,7 @@ impl Config {
             redis: RedisConfig::from_env()?,
             jwt: JwtConfig::from_env()?,
             server: ServerConfig::from_env()?,
-            caidou_pay: CaidouPayConfig::from_env()?,
+            payment: PaymentConfig::from_env()?,
             register_open: env::var("REGISTER_OPEN")
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
@@ -159,21 +169,15 @@ impl ServerConfig {
     }
 }
 
-impl CaidouPayConfig {
+impl PaymentConfig {
     fn from_env() -> Result<Self, AppError> {
         let enabled = env::var("PAYMENT_ENABLED")
             .unwrap_or_else(|_| "false".to_string())
             .parse()
             .map_err(|_| AppError::Message("Invalid PAYMENT_ENABLED value".to_string()))?;
-        Ok(CaidouPayConfig {
+        Ok(PaymentConfig {
             enabled,
-            base_url: env::var("CAIDOU_BASE_URL")
-                .unwrap_or_else(|_| "https://pay.521cd.cn".to_string())
-                .trim_end_matches('/')
-                .to_string(),
-            pid: env::var("CAIDOU_PID").unwrap_or_default(),
-            key: env::var("CAIDOU_KEY").unwrap_or_default(),
-            pay_types: env::var("CAIDOU_PAY_TYPES")
+            pay_types: env::var("PAYMENT_PAY_TYPES")
                 .unwrap_or_default()
                 .split(',')
                 .map(str::trim)
@@ -189,6 +193,57 @@ impl CaidouPayConfig {
                 .trim_end_matches('/')
                 .to_string(),
             site_name: env::var("PAYMENT_SITE_NAME").unwrap_or_else(|_| "LicenseHub".to_string()),
+            wechat_native: WechatNativePayConfig::from_env()?,
         })
     }
+}
+
+impl WechatNativePayConfig {
+    fn from_env() -> Result<Self, AppError> {
+        Ok(Self {
+            enabled: env::var("WECHAT_PAY_ENABLED")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .map_err(|_| AppError::Message("Invalid WECHAT_PAY_ENABLED value".to_string()))?,
+            app_id: env::var("WECHAT_PAY_APP_ID").unwrap_or_default(),
+            mch_id: env::var("WECHAT_PAY_MCH_ID").unwrap_or_default(),
+            merchant_serial_no: env::var("WECHAT_PAY_MERCHANT_SERIAL_NO").unwrap_or_default(),
+            merchant_private_key_pem: read_env_or_file(
+                "WECHAT_PAY_MERCHANT_PRIVATE_KEY",
+                "WECHAT_PAY_MERCHANT_PRIVATE_KEY_PATH",
+            )?
+            .unwrap_or_default(),
+            api_v3_key: env::var("WECHAT_PAY_API_V3_KEY").unwrap_or_default(),
+            platform_public_key_pem: match read_env_or_file(
+                "WECHAT_PAY_PLATFORM_PUBLIC_KEY",
+                "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH",
+            )? {
+                Some(value) => Some(value),
+                None => {
+                    read_env_or_file("WECHAT_PAY_PLATFORM_CERT", "WECHAT_PAY_PLATFORM_CERT_PATH")?
+                }
+            },
+            api_base_url: env::var("WECHAT_PAY_API_BASE_URL")
+                .unwrap_or_else(|_| "https://api.mch.weixin.qq.com".to_string())
+                .trim_end_matches('/')
+                .to_string(),
+        })
+    }
+}
+
+fn read_env_or_file(value_key: &str, path_key: &str) -> Result<Option<String>, AppError> {
+    if let Ok(value) = env::var(value_key) {
+        if !value.trim().is_empty() {
+            return Ok(Some(value));
+        }
+    }
+    if let Ok(path) = env::var(path_key) {
+        let path = path.trim();
+        if !path.is_empty() {
+            return std::fs::read_to_string(path).map(Some).map_err(|error| {
+                AppError::Message(format!("failed to read {}: {}", path_key, error))
+            });
+        }
+    }
+    Ok(None)
 }

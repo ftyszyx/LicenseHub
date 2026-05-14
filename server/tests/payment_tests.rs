@@ -1,13 +1,13 @@
-use app_server::apis::payment_handler::{OrderStatus, caidou_sign};
+use app_server::apis::payment_handler::{OrderStatus, process_payment_notification};
+use payment_adapter::{PaymentNotification, PaymentStatus};
 use salvo::prelude::*;
 use salvo::test::TestClient;
 use serde_json::json;
-use std::collections::BTreeMap;
 
 mod helpers;
 
 #[tokio::test]
-async fn test_create_order_and_caidou_notify_delivers_reg_code() {
+async fn test_create_order_and_payment_notification_delivers_reg_code() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;
     ctx.login_default_user().await;
@@ -56,7 +56,7 @@ async fn test_create_order_and_caidou_notify_delivers_reg_code() {
 
     let resp = TestClient::post(helpers::get_url("/api/orders"))
         .add_header("content-type", "application/json", true)
-        .json(&json!({"plan_id": plan_id, "pay_type": "alipay"}))
+        .json(&json!({"plan_id": plan_id, "pay_type": "wechat_native"}))
         .send(&ctx.app)
         .await;
     let json = helpers::print_response_body_get_json(resp, "create_order").await;
@@ -66,34 +66,20 @@ async fn test_create_order_and_caidou_notify_delivers_reg_code() {
         json["data"]["status"].as_i64().unwrap(),
         OrderStatus::Pending as i64
     );
+    assert_eq!(json["data"]["provider"].as_str().unwrap(), "wechat");
 
-    let mut params = BTreeMap::new();
-    params.insert("pid".to_string(), "1001".to_string());
-    params.insert("trade_no".to_string(), helpers::unique_name("CD"));
-    params.insert("out_trade_no".to_string(), order_no.clone());
-    params.insert("type".to_string(), "alipay".to_string());
-    params.insert("name".to_string(), "30 day license".to_string());
-    params.insert("money".to_string(), "1.23".to_string());
-    params.insert("trade_status".to_string(), "TRADE_SUCCESS".to_string());
-    let sign = caidou_sign(&params, "test_key");
-
-    let notify_body = json!({
-        "pid": "1001",
-        "trade_no": params["trade_no"],
-        "out_trade_no": order_no,
-        "type": "alipay",
-        "name": "30 day license",
-        "money": "1.23",
-        "trade_status": "TRADE_SUCCESS",
-        "sign": sign,
-        "sign_type": "MD5"
-    });
-    let resp = TestClient::post(helpers::get_url("/api/pay/caidou/notify"))
-        .add_header("content-type", "application/json", true)
-        .json(&notify_body)
-        .send(&ctx.app)
-        .await;
-    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    let notification = PaymentNotification {
+        provider: "wechat".to_string(),
+        pay_type: "wechat_native".to_string(),
+        out_trade_no: order_no.clone(),
+        provider_trade_no: Some(helpers::unique_name("WX")),
+        amount_cents: 123,
+        status: PaymentStatus::Success,
+        raw_payload: json!({"source": "unit-test"}),
+    };
+    process_payment_notification(&ctx.app_state, notification.clone())
+        .await
+        .unwrap();
 
     let resp = TestClient::get(helpers::get_url(&format!("/api/orders/{}", order_no)))
         .send(&ctx.app)
@@ -114,12 +100,9 @@ async fn test_create_order_and_caidou_notify_delivers_reg_code() {
             .starts_with("LH-")
     );
 
-    let resp = TestClient::post(helpers::get_url("/api/pay/caidou/notify"))
-        .add_header("content-type", "application/json", true)
-        .json(&notify_body)
-        .send(&ctx.app)
-        .await;
-    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    process_payment_notification(&ctx.app_state, notification)
+        .await
+        .unwrap();
 
     let resp = TestClient::get(helpers::get_url(
         "/api/admin/orders/list?page=1&page_size=10",
