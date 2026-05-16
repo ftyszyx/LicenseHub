@@ -97,3 +97,56 @@ export interface PayMethodsInfo {
   methods: PayMethodInfo[]
   message?: string | null
 }
+
+export type PaymentProvider = 'wechat' | 'alipay'
+
+export enum PaymentChannelStatus {
+  Disabled = 0,
+  Enabled = 1,
+}
+
+export interface WeChatPaymentConfig {
+  app_id: string
+  mch_id: string
+  merchant_serial_no: string
+  merchant_private_key_pem: string
+  api_v3_key: string
+  platform_public_key_pem: string
+  api_base_url: string
+}
+
+export interface AlipayPaymentConfig {
+  app_id: string
+  app_private_key_pem: string
+  alipay_public_key_pem: string
+  gateway_url: string
+  seller_id: string
+}
+
+export type PaymentChannelConfig = Partial<WeChatPaymentConfig & AlipayPaymentConfig>
+
+export interface PaymentChannel {
+  id: number
+  name: string
+  provider: PaymentProvider
+  pay_type: string
+  status: PaymentChannelStatus
+  sort_order: number
+  config: PaymentChannelConfig
+  created_at: string
+  updated_at: string
+}
+
+export type ListPaymentChannelsParams = {
+  provider?: PaymentProvider
+  status?: PaymentChannelStatus
+} & ListParamsReq
+
+export interface SavePaymentChannelReq {
+  name: string
+  provider: PaymentProvider
+  pay_type: string
+  status: PaymentChannelStatus
+  sort_order?: number | null
+  config: PaymentChannelConfig
+}

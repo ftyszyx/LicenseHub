@@ -4,9 +4,10 @@ use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
 use chrono::Utc;
-use data_model::{apps, license_plans, order_events, orders, reg_codes};
+use data_model::{apps, license_plans, order_events, orders, payment_channels, reg_codes};
 use payment_adapter::{
-    CreatePaymentRequest, PaymentError, PaymentHeaders, PaymentNotification, PaymentStatus,
+    AlipayPageAdapter, AlipayPageConfig, CreatePaymentRequest, PaymentAdapter, PaymentError,
+    PaymentHeaders, PaymentNotification, PaymentStatus, WechatNativeAdapter, WechatNativeConfig,
 };
 use salvo::oapi::extract::JsonBody;
 use salvo::prelude::*;
@@ -17,12 +18,16 @@ use sea_orm::{
     TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use uuid::Uuid;
 use validator::Validate;
 
 const PROVIDER_WECHAT: &str = "wechat";
+const PROVIDER_ALIPAY: &str = "alipay";
 const PAY_TYPE_WECHAT_NATIVE: &str = "wechat_native";
+const PAY_TYPE_ALIPAY: &str = "alipay";
+const DEFAULT_WECHAT_API_BASE_URL: &str = "https://api.mch.weixin.qq.com";
+const DEFAULT_ALIPAY_GATEWAY_URL: &str = "https://openapi.alipay.com/gateway.do";
 const ORDER_EVENT_PAYMENT_DELIVERED: &str = "payment.delivered";
 const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
 
@@ -32,6 +37,49 @@ const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
 pub enum PlanStatus {
     Disabled = 0,
     Enabled = 1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(i16)]
+#[serde(from = "i16", into = "i16")]
+pub enum PaymentChannelStatus {
+    Disabled = 0,
+    Enabled = 1,
+}
+
+impl From<i16> for PaymentChannelStatus {
+    fn from(value: i16) -> Self {
+        match value {
+            1 => PaymentChannelStatus::Enabled,
+            _ => PaymentChannelStatus::Disabled,
+        }
+    }
+}
+
+impl From<PaymentChannelStatus> for i16 {
+    fn from(value: PaymentChannelStatus) -> Self {
+        value as i16
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WechatChannelConfig {
+    pub app_id: String,
+    pub mch_id: String,
+    pub merchant_serial_no: String,
+    pub merchant_private_key_pem: String,
+    pub api_v3_key: String,
+    pub platform_public_key_pem: String,
+    pub api_base_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlipayChannelConfig {
+    pub app_id: String,
+    pub app_private_key_pem: String,
+    pub alipay_public_key_pem: String,
+    pub gateway_url: String,
+    pub seller_id: String,
 }
 
 impl From<i16> for PlanStatus {
@@ -154,6 +202,67 @@ impl From<(license_plans::Model, Option<apps::Model>)> for PlanInfo {
             created_at: plan.created_at,
             updated_at: plan.updated_at,
         }
+    }
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreatePaymentChannelReq {
+    pub name: String,
+    pub provider: String,
+    pub pay_type: String,
+    pub status: PaymentChannelStatus,
+    pub sort_order: Option<i32>,
+    pub config: Value,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdatePaymentChannelReq {
+    pub name: Option<String>,
+    pub provider: Option<String>,
+    pub pay_type: Option<String>,
+    pub status: Option<PaymentChannelStatus>,
+    pub sort_order: Option<i32>,
+    pub config: Option<Value>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ListPaymentChannelsParams {
+    #[serde(flatten)]
+    pub pagination: ListParamsReq,
+    pub id: Option<i32>,
+    pub provider: Option<String>,
+    pub pay_type: Option<String>,
+    pub status: Option<i16>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaymentChannelInfo {
+    pub id: i32,
+    pub name: String,
+    pub provider: String,
+    pub pay_type: String,
+    pub status: PaymentChannelStatus,
+    pub sort_order: i32,
+    pub config: Value,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+    pub updated_at: chrono::DateTime<chrono::FixedOffset>,
+}
+
+impl TryFrom<payment_channels::Model> for PaymentChannelInfo {
+    type Error = AppError;
+
+    fn try_from(channel: payment_channels::Model) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: channel.id,
+            name: channel.name,
+            provider: channel.provider.clone(),
+            pay_type: channel.pay_type,
+            status: PaymentChannelStatus::from(channel.status),
+            sort_order: channel.sort_order,
+            config: normalize_channel_config(&channel.provider, &channel.config)?,
+            created_at: channel.created_at,
+            updated_at: channel.updated_at,
+        })
     }
 }
 
@@ -317,7 +426,7 @@ pub async fn list_public_plans(
 #[handler]
 pub async fn list_pay_methods(depot: &mut Depot) -> Result<ApiResponse<PayMethodsInfo>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
-    Ok(ApiResponse::success(fetch_pay_methods_impl(state).await))
+    Ok(ApiResponse::success(fetch_pay_methods_impl(state).await?))
 }
 
 #[handler]
@@ -437,45 +546,195 @@ pub async fn update_plan_impl(
     get_plan_by_id_impl(state, updated.id).await
 }
 
-async fn fetch_pay_methods_impl(state: &AppState) -> PayMethodsInfo {
+#[handler]
+pub async fn create_payment_channel(
+    depot: &mut Depot,
+    req: JsonBody<CreatePaymentChannelReq>,
+) -> Result<ApiResponse<PaymentChannelInfo>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let channel = create_payment_channel_impl(state, req.into_inner()).await?;
+    Ok(ApiResponse::success(channel))
+}
+
+pub async fn create_payment_channel_impl(
+    state: &AppState,
+    req: CreatePaymentChannelReq,
+) -> Result<PaymentChannelInfo, AppError> {
+    let provider = normalize_provider(&req.provider)?;
+    let pay_type = normalize_pay_type(&req.pay_type)?;
+    let name = normalize_required_text(req.name, "name")?;
+    let config = normalize_channel_config(&provider, &req.config)?;
+    let now = Utc::now().fixed_offset();
+    let active = payment_channels::ActiveModel {
+        name: Set(name),
+        provider: Set(provider),
+        pay_type: Set(pay_type),
+        status: Set(i16::from(req.status)),
+        sort_order: Set(req.sort_order.unwrap_or_default()),
+        config: Set(config),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    };
+    let channel = active.insert(&state.db).await?;
+    get_payment_channel_by_id_impl(state, channel.id).await
+}
+
+#[handler]
+pub async fn update_payment_channel(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+    req: JsonBody<UpdatePaymentChannelReq>,
+) -> Result<ApiResponse<PaymentChannelInfo>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let channel = update_payment_channel_impl(state, id.into_inner(), req.into_inner()).await?;
+    Ok(ApiResponse::success(channel))
+}
+
+pub async fn update_payment_channel_impl(
+    state: &AppState,
+    id: i32,
+    req: UpdatePaymentChannelReq,
+) -> Result<PaymentChannelInfo, AppError> {
+    let channel = payment_channels::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("payment_channels", Some(id)))?;
+    let final_provider = match req.provider.as_deref() {
+        Some(provider) => normalize_provider(provider)?,
+        None => channel.provider.clone(),
+    };
+    let final_pay_type = match req.pay_type.as_deref() {
+        Some(pay_type) => normalize_pay_type(pay_type)?,
+        None => channel.pay_type.clone(),
+    };
+    let final_config = match req.config.as_ref() {
+        Some(config) => normalize_channel_config(&final_provider, config)?,
+        None => normalize_channel_config(&final_provider, &channel.config)?,
+    };
+
+    let mut active = channel.into_active_model();
+    if let Some(name) = req.name {
+        active.name = Set(normalize_required_text(name, "name")?);
+    }
+    active.provider = Set(final_provider);
+    active.pay_type = Set(final_pay_type);
+    if let Some(status) = req.status {
+        active.status = Set(i16::from(status));
+    }
+    if let Some(sort_order) = req.sort_order {
+        active.sort_order = Set(sort_order);
+    }
+    active.config = Set(final_config);
+    active.updated_at = Set(Utc::now().fixed_offset());
+    let updated = active.update(&state.db).await?;
+    get_payment_channel_by_id_impl(state, updated.id).await
+}
+
+#[handler]
+pub async fn delete_payment_channel(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+) -> Result<ApiResponse<()>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let id = id.into_inner();
+    let channel = payment_channels::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("payment_channels", Some(id)))?;
+    channel.into_active_model().delete(&state.db).await?;
+    Ok(ApiResponse::success(()))
+}
+
+#[handler]
+pub async fn list_payment_channels(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<PagingResponse<PaymentChannelInfo>>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let params = req.parse_queries::<ListPaymentChannelsParams>()?;
+    let page = params.pagination.page.unwrap_or(1);
+    let page_size = params.pagination.page_size.unwrap_or(20);
+    let mut query = payment_channels::Entity::find()
+        .order_by_asc(payment_channels::Column::SortOrder)
+        .order_by_asc(payment_channels::Column::Id);
+    if let Some(id) = params.id {
+        query = query.filter(payment_channels::Column::Id.eq(id));
+    }
+    if let Some(provider) = params.provider {
+        query = query.filter(payment_channels::Column::Provider.eq(normalize_provider(&provider)?));
+    }
+    if let Some(pay_type) = params.pay_type {
+        query = query.filter(payment_channels::Column::PayType.eq(normalize_pay_type(&pay_type)?));
+    }
+    if let Some(status) = params.status {
+        validate_channel_status(status)?;
+        query = query.filter(payment_channels::Column::Status.eq(status));
+    }
+    let paginator = query.paginate(&state.db, page_size);
+    let total = paginator.num_items().await.unwrap_or(0);
+    let rows = paginator.fetch_page(page - 1).await?;
+    let list = rows
+        .into_iter()
+        .map(PaymentChannelInfo::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ApiResponse::success(PagingResponse { list, total, page }))
+}
+
+pub async fn get_payment_channel_by_id_impl(
+    state: &AppState,
+    id: i32,
+) -> Result<PaymentChannelInfo, AppError> {
+    let channel = payment_channels::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("payment_channels", Some(id)))?;
+    PaymentChannelInfo::try_from(channel)
+}
+
+async fn fetch_pay_methods_impl(state: &AppState) -> Result<PayMethodsInfo, AppError> {
     let cfg = &state.config.payment;
     if !cfg.enabled {
-        return PayMethodsInfo {
+        return Ok(PayMethodsInfo {
             enabled: false,
-            provider: "adapter".to_string(),
+            provider: "database".to_string(),
             merchant_active: false,
             methods: Vec::new(),
             message: Some("payment is disabled".to_string()),
-        };
+        });
     }
-    if state.payment_registry.is_empty() {
-        return PayMethodsInfo {
+    let channels = payment_channels::Entity::find()
+        .filter(payment_channels::Column::Status.eq(i16::from(PaymentChannelStatus::Enabled)))
+        .order_by_asc(payment_channels::Column::SortOrder)
+        .order_by_asc(payment_channels::Column::Id)
+        .all(&state.db)
+        .await?;
+    if channels.is_empty() {
+        return Ok(PayMethodsInfo {
             enabled: false,
-            provider: "adapter".to_string(),
+            provider: "database".to_string(),
             merchant_active: false,
             methods: Vec::new(),
-            message: Some("no payment adapter is configured".to_string()),
-        };
+            message: Some("no payment channel is configured".to_string()),
+        });
     }
 
-    let methods = state
-        .payment_registry
-        .methods()
+    let methods = channels
         .into_iter()
-        .map(|method| PayMethodInfo {
-            pay_type: method.pay_type,
-            label: method.label,
-            provider: method.provider,
+        .map(|channel| PayMethodInfo {
+            pay_type: channel.pay_type,
+            label: channel.name,
+            provider: channel.provider,
             enabled: true,
         })
         .collect::<Vec<_>>();
-    PayMethodsInfo {
+    Ok(PayMethodsInfo {
         enabled: !methods.is_empty(),
-        provider: "adapter".to_string(),
+        provider: "database".to_string(),
         merchant_active: true,
         methods,
         message: None,
-    }
+    })
 }
 
 #[handler]
@@ -554,7 +813,13 @@ pub async fn create_order_impl(
     client_ip: Option<String>,
 ) -> Result<OrderInfo, AppError> {
     let pay_type = normalize_pay_type(&req.pay_type)?;
-    let provider = provider_for_pay_type(&pay_type)?;
+    let channel = find_payment_channel_by_pay_type(state, &pay_type).await?;
+    let provider = channel
+        .as_ref()
+        .map(|channel| channel.provider.as_str())
+        .map(Ok)
+        .unwrap_or_else(|| provider_for_pay_type(&pay_type))?
+        .to_string();
     let plan = license_plans::Entity::find_by_id(req.plan_id)
         .one(&state.db)
         .await?
@@ -581,7 +846,7 @@ pub async fn create_order_impl(
         amount_cents: Set(plan.price_cents),
         pay_type: Set(pay_type.clone()),
         status: Set(i16::from(OrderStatus::Pending)),
-        provider: Set(provider.to_string()),
+        provider: Set(provider.clone()),
         client_ip: Set(client_ip.clone()),
         created_at: Set(now),
         updated_at: Set(now),
@@ -589,28 +854,41 @@ pub async fn create_order_impl(
     };
 
     if state.config.payment.enabled {
-        let adapter = state
-            .payment_registry
-            .get(&pay_type)
-            .map_err(payment_error)?;
+        let channel = channel
+            .filter(|channel| {
+                PaymentChannelStatus::from(channel.status) == PaymentChannelStatus::Enabled
+            })
+            .ok_or_else(|| {
+                AppError::business_logic(
+                    "PAYMENT_CHANNEL_UNAVAILABLE",
+                    "payment channel is not configured or disabled",
+                )
+            })?;
+        let adapter = build_payment_adapter(&channel)?;
         let pay_resp = adapter
             .create_payment(CreatePaymentRequest {
                 out_trade_no: order_no.clone(),
                 subject: plan.name.clone(),
                 amount_cents: plan.price_cents,
-                notify_url: notify_url_for_pay_type(state, &pay_type)?,
+                notify_url: notify_url_for_pay_type(state, &channel.pay_type)?,
+                return_url: return_url_for_provider(state, &channel.provider, &order_no),
                 client_ip,
                 attach: Some(plan.id.to_string()),
             })
             .await
             .map_err(payment_error)?;
-        active.provider = Set(pay_resp.provider);
-        active.pay_type = Set(pay_resp.pay_type);
+        active.provider = Set(channel.provider.clone());
+        active.pay_type = Set(channel.pay_type.clone());
         active.provider_trade_no = Set(pay_resp.provider_trade_no);
         active.pay_url = Set(pay_resp.pay_url);
         active.qr_code = Set(pay_resp.qr_code);
         active.url_scheme = Set(pay_resp.url_scheme);
-        active.provider_payload = Set(Some(pay_resp.raw_payload));
+        active.provider_payload = Set(Some(json!({
+            "channel_id": channel.id,
+            "provider": channel.provider,
+            "pay_type": channel.pay_type,
+            "adapter": pay_resp.raw_payload,
+        })));
     }
 
     let inserted = active.insert(&state.db).await?;
@@ -715,24 +993,99 @@ pub async fn wechat_native_notify(depot: &mut Depot, req: &mut Request, res: &mu
     }
 }
 
+#[handler]
+pub async fn alipay_notify(depot: &mut Depot, req: &mut Request, res: &mut Response) {
+    let state = depot.obtain::<AppState>().unwrap();
+    let result = handle_payment_notify(state, PAY_TYPE_ALIPAY, req).await;
+    match result {
+        Ok(_) => {
+            res.status_code(StatusCode::OK);
+            res.render("success");
+        }
+        Err(error) => {
+            tracing::error!("Alipay payment notification failed: {}", error);
+            res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
+            res.render("failure");
+        }
+    }
+}
+
+#[handler]
+pub async fn payment_notify(
+    depot: &mut Depot,
+    pay_type: PathParam<String>,
+    req: &mut Request,
+    res: &mut Response,
+) {
+    let state = depot.obtain::<AppState>().unwrap();
+    let pay_type = pay_type.into_inner();
+    let provider = payment_channel_provider(state, &pay_type)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| {
+            provider_for_pay_type(&pay_type)
+                .unwrap_or(PROVIDER_WECHAT)
+                .to_string()
+        });
+    let result = handle_payment_notify(state, &pay_type, req).await;
+    match (provider.as_str(), result) {
+        (PROVIDER_ALIPAY, Ok(_)) => {
+            res.status_code(StatusCode::OK);
+            res.render("success");
+        }
+        (PROVIDER_ALIPAY, Err(error)) => {
+            tracing::error!("Payment notification failed: {}", error);
+            res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
+            res.render("failure");
+        }
+        (_, Ok(_)) => {
+            res.status_code(StatusCode::OK);
+            res.render(Json(json!({
+                "code": "SUCCESS",
+                "message": "success"
+            })));
+        }
+        (_, Err(error)) => {
+            tracing::error!("Payment notification failed: {}", error);
+            res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
+            res.render(Json(json!({
+                "code": "FAIL",
+                "message": error.to_string()
+            })));
+        }
+    }
+}
+
 async fn handle_payment_notify(
     state: &AppState,
     pay_type: &str,
     req: &mut Request,
 ) -> Result<OrderInfo, AppError> {
-    let adapter = state
-        .payment_registry
-        .get(pay_type)
-        .map_err(payment_error)?;
+    let pay_type = normalize_pay_type(pay_type)?;
+    let channel = find_payment_channel_by_pay_type(state, &pay_type)
+        .await?
+        .filter(|channel| {
+            PaymentChannelStatus::from(channel.status) == PaymentChannelStatus::Enabled
+        })
+        .ok_or_else(|| {
+            AppError::business_logic(
+                "PAYMENT_CHANNEL_UNAVAILABLE",
+                "payment channel is not configured or disabled",
+            )
+        })?;
+    let adapter = build_payment_adapter(&channel)?;
     let headers = collect_payment_headers(req);
     let body = req
         .payload_with_max_size(1024 * 1024)
         .await
         .map_err(|error| AppError::Message(format!("failed to read payment notify: {}", error)))?;
-    let notification = adapter
+    let mut notification = adapter
         .parse_notification(&headers, body.as_ref())
         .await
         .map_err(payment_error)?;
+    notification.provider = channel.provider.clone();
+    notification.pay_type = channel.pay_type.clone();
     process_payment_notification(state, notification).await
 }
 
@@ -931,28 +1284,204 @@ fn payment_error(error: PaymentError) -> AppError {
     }
 }
 
-fn notify_url_for_pay_type(state: &AppState, pay_type: &str) -> Result<String, AppError> {
-    match pay_type {
-        PAY_TYPE_WECHAT_NATIVE => Ok(format!(
-            "{}/api/pay/wechat/native/notify",
-            state.config.payment.public_base_url
+async fn find_payment_channel_by_pay_type(
+    state: &AppState,
+    pay_type: &str,
+) -> Result<Option<payment_channels::Model>, AppError> {
+    Ok(payment_channels::Entity::find()
+        .filter(payment_channels::Column::PayType.eq(pay_type))
+        .one(&state.db)
+        .await?)
+}
+
+async fn payment_channel_provider(
+    state: &AppState,
+    pay_type: &str,
+) -> Result<Option<String>, AppError> {
+    let pay_type = normalize_pay_type(pay_type)?;
+    Ok(find_payment_channel_by_pay_type(state, &pay_type)
+        .await?
+        .map(|channel| channel.provider))
+}
+
+fn build_payment_adapter(
+    channel: &payment_channels::Model,
+) -> Result<Box<dyn PaymentAdapter>, AppError> {
+    match channel.provider.as_str() {
+        PROVIDER_WECHAT => {
+            let config = parse_wechat_config(&channel.config)?;
+            Ok(Box::new(
+                WechatNativeAdapter::new(WechatNativeConfig {
+                    app_id: config.app_id,
+                    mch_id: config.mch_id,
+                    merchant_serial_no: config.merchant_serial_no,
+                    merchant_private_key_pem: config.merchant_private_key_pem,
+                    api_v3_key: config.api_v3_key,
+                    platform_public_key_pem: Some(config.platform_public_key_pem),
+                    api_base_url: config.api_base_url,
+                })
+                .map_err(payment_error)?,
+            ))
+        }
+        PROVIDER_ALIPAY => {
+            let config = parse_alipay_config(&channel.config)?;
+            Ok(Box::new(
+                AlipayPageAdapter::new(AlipayPageConfig {
+                    app_id: config.app_id,
+                    app_private_key_pem: config.app_private_key_pem,
+                    alipay_public_key_pem: config.alipay_public_key_pem,
+                    gateway_url: config.gateway_url,
+                    seller_id: non_empty_string(config.seller_id),
+                })
+                .map_err(payment_error)?,
+            ))
+        }
+        _ => Err(AppError::validation("payment provider is not supported")),
+    }
+}
+
+fn normalize_channel_config(provider: &str, config: &Value) -> Result<Value, AppError> {
+    match provider {
+        PROVIDER_WECHAT => serde_json::to_value(parse_wechat_config(config)?)
+            .map_err(|error| AppError::validation(format!("invalid WeChat config: {}", error))),
+        PROVIDER_ALIPAY => serde_json::to_value(parse_alipay_config(config)?)
+            .map_err(|error| AppError::validation(format!("invalid Alipay config: {}", error))),
+        _ => Err(AppError::validation("payment provider is not supported")),
+    }
+}
+
+fn parse_wechat_config(config: &Value) -> Result<WechatChannelConfig, AppError> {
+    ensure_config_object(config)?;
+    let api_base_url = non_empty_string(config_text(config, "api_base_url"))
+        .unwrap_or_else(|| DEFAULT_WECHAT_API_BASE_URL.to_string());
+    Ok(WechatChannelConfig {
+        app_id: required_config_text(config, "app_id")?,
+        mch_id: required_config_text(config, "mch_id")?,
+        merchant_serial_no: required_config_text(config, "merchant_serial_no")?,
+        merchant_private_key_pem: required_config_text(config, "merchant_private_key_pem")?,
+        api_v3_key: required_config_text(config, "api_v3_key")?,
+        platform_public_key_pem: required_config_text(config, "platform_public_key_pem")?,
+        api_base_url,
+    })
+}
+
+fn parse_alipay_config(config: &Value) -> Result<AlipayChannelConfig, AppError> {
+    ensure_config_object(config)?;
+    let gateway_url = non_empty_string(config_text(config, "gateway_url"))
+        .unwrap_or_else(|| DEFAULT_ALIPAY_GATEWAY_URL.to_string());
+    Ok(AlipayChannelConfig {
+        app_id: required_config_text(config, "app_id")?,
+        app_private_key_pem: required_config_text(config, "app_private_key_pem")?,
+        alipay_public_key_pem: required_config_text(config, "alipay_public_key_pem")?,
+        gateway_url,
+        seller_id: config_text(config, "seller_id"),
+    })
+}
+
+fn ensure_config_object(config: &Value) -> Result<(), AppError> {
+    if config.is_object() {
+        Ok(())
+    } else {
+        Err(AppError::validation(
+            "payment channel config must be an object",
+        ))
+    }
+}
+
+fn required_config_text(config: &Value, key: &str) -> Result<String, AppError> {
+    let value = config_text(config, key);
+    if value.is_empty() {
+        return Err(AppError::validation(format!(
+            "payment channel config field '{}' is required",
+            key
+        )));
+    }
+    Ok(value)
+}
+
+fn config_text(config: &Value, key: &str) -> String {
+    config
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn normalize_required_text(value: String, field: &str) -> Result<String, AppError> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(AppError::validation(format!("{} is required", field)));
+    }
+    Ok(value)
+}
+
+fn normalize_provider(provider: &str) -> Result<String, AppError> {
+    let provider = provider.trim().to_ascii_lowercase();
+    match provider.as_str() {
+        PROVIDER_WECHAT | PROVIDER_ALIPAY => Ok(provider),
+        _ => Err(AppError::validation("payment provider is not supported")),
+    }
+}
+
+fn validate_channel_status(status: i16) -> Result<(), AppError> {
+    match status {
+        0 | 1 => Ok(()),
+        _ => Err(AppError::validation(
+            "payment channel status is not supported",
         )),
-        _ => Err(AppError::validation("pay_type is not supported")),
+    }
+}
+
+fn notify_url_for_pay_type(state: &AppState, pay_type: &str) -> Result<String, AppError> {
+    let pay_type = normalize_pay_type(pay_type)?;
+    Ok(format!(
+        "{}/api/pay/{}/notify",
+        state.config.payment.public_base_url.trim_end_matches('/'),
+        pay_type
+    ))
+}
+
+fn return_url_for_provider(state: &AppState, provider: &str, order_no: &str) -> Option<String> {
+    match provider {
+        PROVIDER_ALIPAY => Some(format!(
+            "{}/pay/result?order_no={}&result=pending",
+            state.config.payment.frontend_base_url.trim_end_matches('/'),
+            order_no
+        )),
+        _ => None,
     }
 }
 
 fn provider_for_pay_type(pay_type: &str) -> Result<&'static str, AppError> {
     match pay_type {
         PAY_TYPE_WECHAT_NATIVE => Ok(PROVIDER_WECHAT),
+        PAY_TYPE_ALIPAY | "alipay_page" => Ok(PROVIDER_ALIPAY),
         _ => Err(AppError::validation("pay_type is not supported")),
     }
 }
 
 fn normalize_pay_type(pay_type: &str) -> Result<String, AppError> {
-    match pay_type {
-        PAY_TYPE_WECHAT_NATIVE => Ok(pay_type.to_string()),
-        _ => Err(AppError::validation("pay_type is not supported")),
+    let pay_type = pay_type.trim().to_string();
+    if pay_type.is_empty() {
+        return Err(AppError::validation("pay_type is required"));
     }
+    if pay_type.len() > 64 {
+        return Err(AppError::validation("pay_type must be at most 64 bytes"));
+    }
+    if !pay_type
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(AppError::validation(
+            "pay_type may only contain letters, numbers, '_' and '-'",
+        ));
+    }
+    Ok(pay_type)
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
 }
 
 fn new_order_no() -> String {

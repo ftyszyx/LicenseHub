@@ -144,6 +144,26 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("orders", "READ"))
                 .get(apis::payment_handler::list_orders),
         )
+        .push(
+            Router::with_path("payment-channels")
+                .hoop(RequirePerm::new("payment_settings", "CREATE"))
+                .post(apis::payment_handler::create_payment_channel),
+        )
+        .push(
+            Router::with_path("payment-channels/list")
+                .hoop(RequirePerm::new("payment_settings", "READ"))
+                .get(apis::payment_handler::list_payment_channels),
+        )
+        .push(
+            Router::with_path("payment-channels/{id}")
+                .hoop(RequirePerm::new("payment_settings", "UPDATE"))
+                .put(apis::payment_handler::update_payment_channel),
+        )
+        .push(
+            Router::with_path("payment-channels/{id}")
+                .hoop(RequirePerm::new("payment_settings", "DELETE"))
+                .delete(apis::payment_handler::delete_payment_channel),
+        )
         //reg_codes
         .push(
             Router::with_path("reg_codes")
@@ -211,6 +231,14 @@ pub fn create_router(app_state: AppState) -> Service {
         .push(
             Router::with_path("/api/pay/wechat/native/notify")
                 .post(apis::payment_handler::wechat_native_notify),
+        )
+        .push(
+            Router::with_path("/api/pay/alipay/page/notify")
+                .post(apis::payment_handler::alipay_notify),
+        )
+        .push(
+            Router::with_path("/api/pay/{pay_type}/notify")
+                .post(apis::payment_handler::payment_notify),
         )
         .push(Router::with_path("/api/reg/validate").post(apis::reg_codes_handler::validate_code))
         .push(

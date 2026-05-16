@@ -4,9 +4,12 @@ import type {
   CreateOrderReq,
   LicensePlan,
   ListOrdersParams,
+  ListPaymentChannelsParams,
   ListPlansParams,
   OrderModel,
+  PaymentChannel,
   PayMethodsInfo,
+  SavePaymentChannelReq,
   SavePlanReq,
 } from '@/types/payments'
 
@@ -52,5 +55,25 @@ export const deletePlan = async (id: number) => {
 
 export const fetchOrders = async (params: ListOrdersParams = {}) => {
   const response = await request.get('/admin/orders/list', { params }) as ApiResponse<PagingResponse<OrderModel>>
+  return response.data
+}
+
+export const fetchPaymentChannels = async (params: ListPaymentChannelsParams = {}) => {
+  const response = await request.get('/admin/payment-channels/list', { params }) as ApiResponse<PagingResponse<PaymentChannel>>
+  return response.data
+}
+
+export const createPaymentChannel = async (payload: SavePaymentChannelReq) => {
+  const response = await request.post('/admin/payment-channels', payload) as ApiResponse<PaymentChannel>
+  return response.data
+}
+
+export const updatePaymentChannel = async (id: number, payload: Partial<SavePaymentChannelReq>) => {
+  const response = await request.put(`/admin/payment-channels/${id}`, payload) as ApiResponse<PaymentChannel>
+  return response.data
+}
+
+export const deletePaymentChannel = async (id: number) => {
+  const response = await request.delete(`/admin/payment-channels/${id}`) as ApiResponse<void>
   return response.data
 }

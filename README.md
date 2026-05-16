@@ -34,7 +34,7 @@ https://blog.bytefuse.cn/Az6dd7PeSomasjxtphxchUqxnOg
 1. 前端就是一个管理员后台，使用vue3.
 2. 后端：最近在学 rust，想拿一个项目练手，所以就用 rust了。 web框架使用salvo：
    https://github.com/salvo-rs/salvo
-3. 先不加入支付，只用实现注册码生成和验证接口即可。
+3. 注册码生成和验证接口为基础能力，支付渠道配置迁移到数据库，并通过管理员后台维护。
 
 ## 项目结构
 
@@ -48,6 +48,7 @@ server: 后端rust代码
 
 修改.env.example为.env
 配置其中的参数
+
 
 ### 准备数据库和redis环境
 

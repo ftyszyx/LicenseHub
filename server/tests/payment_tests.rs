@@ -137,3 +137,89 @@ async fn test_public_products_list() {
     assert!(json["success"].as_bool().unwrap());
     assert!(json["data"].is_array());
 }
+
+#[tokio::test]
+async fn test_admin_payment_channels_crud() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let pay_type = helpers::unique_name("alipay_page_test")
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .take(32)
+        .collect::<String>();
+    let create_body = json!({
+        "name": "Alipay test channel",
+        "provider": "alipay",
+        "pay_type": pay_type,
+        "status": 1,
+        "sort_order": 5,
+        "config": {
+            "app_id": "2021000000000000",
+            "app_private_key_pem": "-----BEGIN PRIVATE KEY-----\\ntest\\n-----END PRIVATE KEY-----",
+            "alipay_public_key_pem": "-----BEGIN PUBLIC KEY-----\\ntest\\n-----END PUBLIC KEY-----",
+            "gateway_url": "",
+            "seller_id": ""
+        }
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/payment-channels"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_body)
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_payment_channel").await;
+    assert!(json["success"].as_bool().unwrap());
+    let channel_id = json["data"]["id"].as_i64().unwrap() as i32;
+    assert_eq!(json["data"]["provider"].as_str().unwrap(), "alipay");
+    assert_eq!(json["data"]["pay_type"].as_str().unwrap(), pay_type);
+    assert_eq!(
+        json["data"]["config"]["gateway_url"].as_str().unwrap(),
+        "https://openapi.alipay.com/gateway.do"
+    );
+
+    let resp = TestClient::get(helpers::get_url(
+        "/api/admin/payment-channels/list?page=1&page_size=20&provider=alipay&status=1",
+    ))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "list_payment_channels").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert!(
+        json["data"]["list"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"].as_i64() == Some(channel_id as i64))
+    );
+
+    let resp = TestClient::put(helpers::get_url(&format!(
+        "/api/admin/payment-channels/{}",
+        channel_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({
+        "name": "Alipay disabled channel",
+        "status": 0,
+        "sort_order": 9
+    }))
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "update_payment_channel").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["status"].as_i64().unwrap(), 0);
+    assert_eq!(json["data"]["sort_order"].as_i64().unwrap(), 9);
+
+    let resp = TestClient::delete(helpers::get_url(&format!(
+        "/api/admin/payment-channels/{}",
+        channel_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "delete_payment_channel").await;
+    assert!(json["success"].as_bool().unwrap());
+}

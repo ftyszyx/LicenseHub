@@ -11,6 +11,7 @@ import RegisterView from '@/views/auth/RegisterView.vue'
 import DevicesAdminView from '@/views/admin/DevicesAdminView.vue'
 import PlansAdminView from '@/views/admin/PlansAdminView.vue'
 import OrdersAdminView from '@/views/admin/OrdersAdminView.vue'
+import PaymentSettingsAdminView from '@/views/admin/PaymentSettingsAdminView.vue'
 import PayResultView from '@/views/PayResultView.vue'
 import OrderQueryView from '@/views/OrderQueryView.vue'
 import RegApiTestView from '@/views/admin/RegApiTestView.vue'
@@ -98,6 +99,11 @@ const router = createRouter({
                     path: RoutePath.AdminOrders,
                     name: RouteName.AdminOrders,
                     component: OrdersAdminView
+                },
+                {
+                    path: RoutePath.AdminPaymentSettings,
+                    name: RouteName.AdminPaymentSettings,
+                    component: PaymentSettingsAdminView
                 },
                 {
                     path: RoutePath.AdminDevices,

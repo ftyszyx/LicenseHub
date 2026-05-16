@@ -1,11 +1,11 @@
-# 支付模块
+# Payment crate
 
-支付能力通过 adapter 暴露，业务系统只依赖统一 trait。
+Payment providers are exposed through the `PaymentAdapter` trait so the app server can create orders and parse provider notifications through one boundary.
 
-## 微信 Native 支付
+## WeChat Native
 
-已实现 `WechatNativeAdapter`，对接微信支付 V3 Native 下单和支付通知。
+`WechatNativeAdapter` supports WeChat Pay V3 Native order creation and payment notifications.
 
-## 支付宝支付
+## Alipay Page Pay
 
-预留 adapter 扩展位。后续新增支付宝时，在本 crate 中实现 `PaymentAdapter` 并注册到业务系统的 `PaymentRegistry`。
+`AlipayPageAdapter` supports Alipay PC website payment through `alipay.trade.page.pay`. It generates a signed gateway URL for browser redirection and verifies Alipay asynchronous notifications.

@@ -3,6 +3,7 @@ pub mod apps;
 pub mod license_plans;
 pub mod order_events;
 pub mod orders;
+pub mod payment_channels;
 pub mod permissions;
 pub mod prelude;
 pub mod reg_codes;

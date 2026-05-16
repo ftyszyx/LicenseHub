@@ -27,6 +27,8 @@ const menuItems: AdminMenuItem[] = [
   { label: 'menu.products', icon: 'Goods', path: RoutePath.AdminProducts },
   //i18n-key: menu.orders
   { label: 'menu.orders', icon: 'ShoppingCart', path: RoutePath.AdminOrders },
+  //i18n-key: menu.payment_settings
+  { label: 'menu.payment_settings', icon: 'CreditCard', path: RoutePath.AdminPaymentSettings },
   //i18n-key: menu.devices
   { label: 'menu.devices', icon: 'Iphone', path: RoutePath.AdminDevices },
   //i18n-key: menu.reg_codes

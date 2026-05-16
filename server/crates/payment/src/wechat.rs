@@ -15,8 +15,6 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::Sha256;
-use x509_parser::pem::parse_x509_pem;
-use x509_parser::prelude::FromDer;
 
 const PROVIDER_WECHAT: &str = "wechat";
 const PAY_TYPE_WECHAT_NATIVE: &str = "wechat_native";
@@ -35,17 +33,14 @@ pub struct WechatNativeConfig {
 impl WechatNativeConfig {
     pub fn validate(&self) -> Result<(), PaymentError> {
         for (name, value) in [
-            ("WECHAT_PAY_APP_ID", self.app_id.as_str()),
-            ("WECHAT_PAY_MCH_ID", self.mch_id.as_str()),
+            ("app_id", self.app_id.as_str()),
+            ("mch_id", self.mch_id.as_str()),
+            ("merchant_serial_no", self.merchant_serial_no.as_str()),
             (
-                "WECHAT_PAY_MERCHANT_SERIAL_NO",
-                self.merchant_serial_no.as_str(),
-            ),
-            (
-                "WECHAT_PAY_MERCHANT_PRIVATE_KEY",
+                "merchant_private_key_pem",
                 self.merchant_private_key_pem.as_str(),
             ),
-            ("WECHAT_PAY_API_V3_KEY", self.api_v3_key.as_str()),
+            ("api_v3_key", self.api_v3_key.as_str()),
         ] {
             if value.trim().is_empty() {
                 return Err(PaymentError::Config(format!("{} must be set", name)));
@@ -53,7 +48,7 @@ impl WechatNativeConfig {
         }
         if self.api_v3_key.as_bytes().len() != 32 {
             return Err(PaymentError::Config(
-                "WECHAT_PAY_API_V3_KEY must be 32 bytes".to_string(),
+                "api_v3_key must be 32 bytes".to_string(),
             ));
         }
         Ok(())
@@ -82,7 +77,7 @@ impl WechatNativeAdapter {
         let platform_public_key = config
             .platform_public_key_pem
             .as_deref()
-            .map(parse_public_key_or_cert)
+            .map(parse_public_key)
             .transpose()?;
         Ok(Self {
             config,
@@ -120,8 +115,7 @@ impl WechatNativeAdapter {
     ) -> Result<(), PaymentError> {
         let platform_public_key = self.platform_public_key.as_ref().ok_or_else(|| {
             PaymentError::Config(
-                "WECHAT_PAY_PLATFORM_PUBLIC_KEY or WECHAT_PAY_PLATFORM_CERT is required for notifications"
-                    .to_string(),
+                "platform_public_key_pem is required for notifications".to_string(),
             )
         })?;
         let timestamp = get_header(headers, "wechatpay-timestamp")?;
@@ -158,10 +152,8 @@ impl WechatNativeAdapter {
         let ciphertext = BASE64.decode(&resource.ciphertext).map_err(|error| {
             PaymentError::Notification(format!("invalid WeChat ciphertext: {}", error))
         })?;
-        let cipher =
-            Aes256Gcm::new_from_slice(self.config.api_v3_key.as_bytes()).map_err(|_| {
-                PaymentError::Config("WECHAT_PAY_API_V3_KEY must be 32 bytes".to_string())
-            })?;
+        let cipher = Aes256Gcm::new_from_slice(self.config.api_v3_key.as_bytes())
+            .map_err(|_| PaymentError::Config("api_v3_key must be 32 bytes".to_string()))?;
         let aad = resource.associated_data.as_deref().unwrap_or("").as_bytes();
         let plaintext = cipher
             .decrypt(
@@ -387,27 +379,7 @@ fn get_header<'a>(headers: &'a PaymentHeaders, name: &str) -> Result<&'a str, Pa
         .ok_or_else(|| PaymentError::Notification(format!("missing header {}", name)))
 }
 
-fn parse_public_key_or_cert(pem: &str) -> Result<RsaPublicKey, PaymentError> {
-    if pem.contains("BEGIN CERTIFICATE") {
-        let (_, parsed_pem) = parse_x509_pem(pem.as_bytes()).map_err(|error| {
-            PaymentError::Config(format!(
-                "invalid WeChat platform certificate PEM: {}",
-                error
-            ))
-        })?;
-        let (_, cert) = x509_parser::certificate::X509Certificate::from_der(&parsed_pem.contents)
-            .map_err(|error| {
-            PaymentError::Config(format!("invalid WeChat platform certificate: {}", error))
-        })?;
-        return RsaPublicKey::from_public_key_der(cert.tbs_certificate.subject_pki.raw).map_err(
-            |error| {
-                PaymentError::Config(format!(
-                    "invalid WeChat platform certificate public key: {}",
-                    error
-                ))
-            },
-        );
-    }
+fn parse_public_key(pem: &str) -> Result<RsaPublicKey, PaymentError> {
     RsaPublicKey::from_public_key_pem(pem).map_err(|error| {
         PaymentError::Config(format!("invalid WeChat platform public key PEM: {}", error))
     })

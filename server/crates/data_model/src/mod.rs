@@ -8,6 +8,7 @@ pub mod license_plans;
 pub mod order_events;
 pub mod orders;
 pub mod permissions;
+pub mod payment_channels;
 pub mod reg_codes;
 pub mod role_permissions;
 pub mod roles;

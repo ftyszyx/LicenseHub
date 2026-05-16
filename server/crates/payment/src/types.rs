@@ -42,6 +42,7 @@ pub struct CreatePaymentRequest {
     pub subject: String,
     pub amount_cents: i32,
     pub notify_url: String,
+    pub return_url: Option<String>,
     pub client_ip: Option<String>,
     pub attach: Option<String>,
 }
