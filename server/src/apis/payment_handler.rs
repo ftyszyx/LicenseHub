@@ -69,7 +69,8 @@ pub struct WechatChannelConfig {
     pub merchant_serial_no: String,
     pub merchant_private_key_pem: String,
     pub api_v3_key: String,
-    pub platform_public_key_pem: String,
+    pub wechatpay_public_key_id: String,
+    pub wechatpay_public_key_pem: String,
     pub api_base_url: String,
 }
 
@@ -259,7 +260,7 @@ impl TryFrom<payment_channels::Model> for PaymentChannelInfo {
             pay_type: channel.pay_type,
             status: PaymentChannelStatus::from(channel.status),
             sort_order: channel.sort_order,
-            config: normalize_channel_config(&channel.provider, &channel.config)?,
+            config: response_channel_config(&channel.provider, &channel.config)?,
             created_at: channel.created_at,
             updated_at: channel.updated_at,
         })
@@ -865,12 +866,13 @@ pub async fn create_order_impl(
                 )
             })?;
         let adapter = build_payment_adapter(&channel)?;
+        let notify_url = notify_url_for_pay_type(state, &channel.pay_type)?;
         let pay_resp = adapter
             .create_payment(CreatePaymentRequest {
                 out_trade_no: order_no.clone(),
                 subject: plan.name.clone(),
                 amount_cents: plan.price_cents,
-                notify_url: notify_url_for_pay_type(state, &channel.pay_type)?,
+                notify_url: notify_url.clone(),
                 return_url: return_url_for_provider(state, &channel.provider, &order_no),
                 client_ip,
                 attach: Some(plan.id.to_string()),
@@ -887,6 +889,7 @@ pub async fn create_order_impl(
             "channel_id": channel.id,
             "provider": channel.provider,
             "pay_type": channel.pay_type,
+            "notify_url": notify_url,
             "adapter": pay_resp.raw_payload,
         })));
     }
@@ -901,7 +904,9 @@ pub async fn get_order(
     order_no: PathParam<String>,
 ) -> Result<ApiResponse<PublicOrderInfo>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
-    let order = get_order_by_no_impl(state, &order_no.into_inner()).await?;
+    let order_no = order_no.into_inner();
+    let order = get_order_by_no_impl(state, &order_no).await?;
+    let order = sync_pending_order_from_provider(state, order).await?;
     Ok(ApiResponse::success(PublicOrderInfo::from(order)))
 }
 
@@ -949,6 +954,56 @@ pub async fn get_order_by_no_impl(state: &AppState, order_no: &str) -> Result<Or
         .await?
         .ok_or_else(|| AppError::not_found("orders", None))?;
     build_order_info(state, row).await
+}
+
+async fn sync_pending_order_from_provider(
+    state: &AppState,
+    order: OrderInfo,
+) -> Result<OrderInfo, AppError> {
+    if order.status != OrderStatus::Pending
+        || !state.config.payment.enabled
+        || order.provider != PROVIDER_WECHAT
+    {
+        return Ok(order);
+    }
+
+    let channel = match find_payment_channel_by_pay_type(state, &order.pay_type)
+        .await?
+        .filter(|channel| {
+            PaymentChannelStatus::from(channel.status) == PaymentChannelStatus::Enabled
+        }) {
+        Some(channel) => channel,
+        None => return Ok(order),
+    };
+    let adapter = build_payment_adapter(&channel)?;
+    match adapter.query_payment(&order.order_no).await {
+        Ok(Some(mut notification)) if notification.status == PaymentStatus::Success => {
+            notification.provider = channel.provider.clone();
+            notification.pay_type = channel.pay_type.clone();
+            match process_payment_notification(state, notification).await {
+                Ok(updated) => Ok(updated),
+                Err(error) => {
+                    tracing::warn!(
+                        order_no = %order.order_no,
+                        pay_type = %order.pay_type,
+                        "payment query succeeded but order sync failed: {}",
+                        error
+                    );
+                    Ok(order)
+                }
+            }
+        }
+        Ok(_) => Ok(order),
+        Err(error) => {
+            tracing::warn!(
+                order_no = %order.order_no,
+                pay_type = %order.pay_type,
+                "failed to query pending payment status: {}",
+                error
+            );
+            Ok(order)
+        }
+    }
 }
 
 async fn build_order_info(
@@ -1317,7 +1372,8 @@ fn build_payment_adapter(
                     merchant_serial_no: config.merchant_serial_no,
                     merchant_private_key_pem: config.merchant_private_key_pem,
                     api_v3_key: config.api_v3_key,
-                    platform_public_key_pem: Some(config.platform_public_key_pem),
+                    wechatpay_public_key_id: config.wechatpay_public_key_id,
+                    wechatpay_public_key_pem: config.wechatpay_public_key_pem,
                     api_base_url: config.api_base_url,
                 })
                 .map_err(payment_error)?,
@@ -1350,6 +1406,30 @@ fn normalize_channel_config(provider: &str, config: &Value) -> Result<Value, App
     }
 }
 
+fn response_channel_config(provider: &str, config: &Value) -> Result<Value, AppError> {
+    match provider {
+        PROVIDER_WECHAT => Ok(json!({
+            "app_id": config_text(config, "app_id"),
+            "mch_id": config_text(config, "mch_id"),
+            "merchant_serial_no": config_text(config, "merchant_serial_no"),
+            "merchant_private_key_pem": config_text(config, "merchant_private_key_pem"),
+            "api_v3_key": config_text(config, "api_v3_key"),
+            "wechatpay_public_key_id": config_text(config, "wechatpay_public_key_id"),
+            "wechatpay_public_key_pem": non_empty_string(config_text(config, "wechatpay_public_key_pem"))
+                .or_else(|| non_empty_string(config_text(config, "platform_public_key_pem")))
+                .unwrap_or_default(),
+            "api_base_url": non_empty_string(config_text(config, "api_base_url"))
+                .unwrap_or_else(|| DEFAULT_WECHAT_API_BASE_URL.to_string()),
+        })),
+        PROVIDER_ALIPAY => {
+            let normalized = parse_alipay_config(config)?;
+            serde_json::to_value(normalized)
+                .map_err(|error| AppError::validation(format!("invalid Alipay config: {}", error)))
+        }
+        _ => Err(AppError::validation("payment provider is not supported")),
+    }
+}
+
 fn parse_wechat_config(config: &Value) -> Result<WechatChannelConfig, AppError> {
     ensure_config_object(config)?;
     let api_base_url = non_empty_string(config_text(config, "api_base_url"))
@@ -1360,7 +1440,8 @@ fn parse_wechat_config(config: &Value) -> Result<WechatChannelConfig, AppError> 
         merchant_serial_no: required_config_text(config, "merchant_serial_no")?,
         merchant_private_key_pem: required_config_text(config, "merchant_private_key_pem")?,
         api_v3_key: required_config_text(config, "api_v3_key")?,
-        platform_public_key_pem: required_config_text(config, "platform_public_key_pem")?,
+        wechatpay_public_key_id: required_config_text(config, "wechatpay_public_key_id")?,
+        wechatpay_public_key_pem: required_config_text(config, "wechatpay_public_key_pem")?,
         api_base_url,
     })
 }

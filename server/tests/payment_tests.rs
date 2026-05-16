@@ -222,4 +222,107 @@ async fn test_admin_payment_channels_crud() {
     .await;
     let json = helpers::print_response_body_get_json(resp, "delete_payment_channel").await;
     assert!(json["success"].as_bool().unwrap());
+
+    let wechat_pay_type = helpers::unique_name("wechat_native_test")
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .take(32)
+        .collect::<String>();
+    let resp = TestClient::post(helpers::get_url("/api/admin/payment-channels"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "name": "WeChat test channel",
+            "provider": "wechat",
+            "pay_type": wechat_pay_type,
+            "status": 1,
+            "sort_order": 1,
+            "config": {
+                "app_id": "wx1234567890abcdef",
+                "mch_id": "1900000001",
+                "merchant_serial_no": "ABCDEF1234567890",
+                "merchant_private_key_pem": "-----BEGIN PRIVATE KEY-----\\ntest\\n-----END PRIVATE KEY-----",
+                "api_v3_key": "12345678901234567890123456789012",
+                "wechatpay_public_key_id": "PUB_KEY_ID_0114236900992025041500086300000000",
+                "wechatpay_public_key_pem": "-----BEGIN PUBLIC KEY-----\\ntest\\n-----END PUBLIC KEY-----",
+                "api_base_url": ""
+            }
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_wechat_payment_channel").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["provider"].as_str().unwrap(), "wechat");
+    assert_eq!(
+        json["data"]["config"]["api_base_url"].as_str().unwrap(),
+        "https://api.mch.weixin.qq.com"
+    );
+    assert_eq!(
+        json["data"]["config"]["wechatpay_public_key_id"]
+            .as_str()
+            .unwrap(),
+        "PUB_KEY_ID_0114236900992025041500086300000000"
+    );
+    assert!(
+        json["data"]["config"]
+            .get("platform_public_key_pem")
+            .is_none()
+    );
+
+    let legacy_wechat_pay_type = helpers::unique_name("wechat_legacy_test")
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .take(32)
+        .collect::<String>();
+    sqlx::query(
+        r#"
+        INSERT INTO payment_channels (name, provider, pay_type, status, sort_order, config)
+        VALUES ($1, 'wechat', $2, 1, 2, $3::jsonb)
+        "#,
+    )
+    .bind("Legacy WeChat channel")
+    .bind(&legacy_wechat_pay_type)
+    .bind(
+        json!({
+            "app_id": "wxlegacy",
+            "mch_id": "1900000002",
+            "merchant_serial_no": "LEGACY123456",
+            "merchant_private_key_pem": "-----BEGIN PRIVATE KEY-----\\nlegacy\\n-----END PRIVATE KEY-----",
+            "api_v3_key": "12345678901234567890123456789012",
+            "platform_public_key_pem": "-----BEGIN PUBLIC KEY-----\\nlegacy\\n-----END PUBLIC KEY-----",
+            "api_base_url": ""
+        })
+        .to_string(),
+    )
+    .execute(
+        &sqlx::PgPool::connect(&ctx.app_state.config.database.db_url)
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/admin/payment-channels/list?page=1&page_size=20&pay_type={}",
+        legacy_wechat_pay_type
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json =
+        helpers::print_response_body_get_json(resp, "list_legacy_wechat_payment_channel").await;
+    assert!(json["success"].as_bool().unwrap());
+    let legacy = &json["data"]["list"].as_array().unwrap()[0];
+    assert_eq!(
+        legacy["config"]["wechatpay_public_key_pem"]
+            .as_str()
+            .unwrap(),
+        "-----BEGIN PUBLIC KEY-----\\nlegacy\\n-----END PUBLIC KEY-----"
+    );
+    assert_eq!(
+        legacy["config"]["wechatpay_public_key_id"]
+            .as_str()
+            .unwrap(),
+        ""
+    );
 }

@@ -85,4 +85,11 @@ pub trait PaymentAdapter: Send + Sync {
         headers: &PaymentHeaders,
         body: &[u8],
     ) -> Result<PaymentNotification, PaymentError>;
+
+    async fn query_payment(
+        &self,
+        _out_trade_no: &str,
+    ) -> Result<Option<PaymentNotification>, PaymentError> {
+        Ok(None)
+    }
 }

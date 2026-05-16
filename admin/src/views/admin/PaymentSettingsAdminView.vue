@@ -86,29 +86,32 @@
 
         <el-divider content-position="left">{{ $t('payment_settings.config') }}</el-divider>
 
-        <div class="grid grid-cols-2 gap-x-4">
-          <el-form-item
-            v-for="field in activeTextFields"
-            :key="field.key"
-            :label="$t(field.label)"
-            :required="field.required"
-          >
-            <el-input v-model="form.config[field.key]" />
-          </el-form-item>
-        </div>
-
         <el-form-item
-          v-for="field in activeSecretFields"
+          v-for="field in activeFields"
           :key="field.key"
           :label="$t(field.label)"
           :required="field.required"
         >
           <div class="w-full space-y-2">
-            <div class="flex items-center gap-2">
-              <el-button size="small" @click="selectFile(field.key)">{{ $t('common.upload') }}</el-button>
-              <span class="truncate text-xs text-gray-500">{{ uploadNames[field.key] || $t('payment_settings.upload_hint') }}</span>
+            <template v-if="field.upload">
+              <div class="flex items-center gap-2">
+                <el-button size="small" @click="selectFile(field.key)">{{ $t('common.upload') }}</el-button>
+                <span class="truncate text-xs text-gray-500">{{ uploadNames[field.key] || $t('payment_settings.upload_hint') }}</span>
+              </div>
+              <el-input v-model="form.config[field.key]" type="textarea" :rows="4" resize="vertical" />
+            </template>
+            <el-input
+              v-else
+              v-model="form.config[field.key]"
+              :maxlength="field.maxLength"
+              :show-word-limit="Boolean(field.maxLength)"
+            />
+            <div class="text-xs leading-5 text-gray-500">
+              {{ $t(field.help) }}
+              <el-link v-if="field.link" type="primary" :href="field.link" target="_blank" class="ml-1">
+                {{ $t('payment_settings.docs_link') }}
+              </el-link>
             </div>
-            <el-input v-model="form.config[field.key]" type="textarea" :rows="4" resize="vertical" />
           </div>
         </el-form-item>
       </el-form>
@@ -151,8 +154,11 @@ type ConfigKey = keyof PaymentChannelConfig
 type ConfigField = {
   key: ConfigKey
   label: string
+  help: string
+  link?: string
   required: boolean
-  secret?: boolean
+  upload?: boolean
+  maxLength?: number
 }
 
 type PaymentChannelForm = {
@@ -193,28 +199,32 @@ const rules = reactive<FormRules<PaymentChannelForm>>({
   pay_type: [{ required: true, message: 'Pay type required', trigger: 'blur' }],
 })
 
+const wechatPayDocs = 'https://pay.weixin.qq.com/doc/v3/merchant/4013053053'
+const wechatNativeDocs = 'https://pay.weixin.qq.com/doc/v3/merchant/4012791877'
+const alipayKeyDocs = 'https://opendocs.alipay.com/common/02kipk'
+const alipayPagePayDocs = 'https://opendocs.alipay.com/open/270/105899'
+
 const configFields: Record<PaymentProvider, ConfigField[]> = {
   wechat: [
-    { key: 'app_id', label: 'payment_settings.app_id', required: true },
-    { key: 'mch_id', label: 'payment_settings.mch_id', required: true },
-    { key: 'merchant_serial_no', label: 'payment_settings.merchant_serial_no', required: true },
-    { key: 'api_base_url', label: 'payment_settings.api_base_url', required: false },
-    { key: 'api_v3_key', label: 'payment_settings.api_v3_key', required: true, secret: true },
-    { key: 'merchant_private_key_pem', label: 'payment_settings.merchant_private_key_pem', required: true, secret: true },
-    { key: 'platform_public_key_pem', label: 'payment_settings.platform_public_key_pem', required: true, secret: true },
+    { key: 'app_id', label: 'payment_settings.app_id', help: 'payment_settings.help_wechat_app_id', link: wechatPayDocs, required: true },
+    { key: 'mch_id', label: 'payment_settings.mch_id', help: 'payment_settings.help_mch_id', link: wechatPayDocs, required: true },
+    { key: 'merchant_serial_no', label: 'payment_settings.merchant_serial_no', help: 'payment_settings.help_merchant_serial_no', link: wechatPayDocs, required: true },
+    { key: 'api_base_url', label: 'payment_settings.api_base_url', help: 'payment_settings.help_wechat_api_base_url', link: wechatNativeDocs, required: false },
+    { key: 'api_v3_key', label: 'payment_settings.api_v3_key', help: 'payment_settings.help_api_v3_key', link: wechatPayDocs, required: true, maxLength: 32 },
+    { key: 'merchant_private_key_pem', label: 'payment_settings.merchant_private_key_pem', help: 'payment_settings.help_merchant_private_key_pem', link: wechatPayDocs, required: true, upload: true },
+    { key: 'wechatpay_public_key_id', label: 'payment_settings.wechatpay_public_key_id', help: 'payment_settings.help_wechatpay_public_key_id', link: wechatPayDocs, required: true },
+    { key: 'wechatpay_public_key_pem', label: 'payment_settings.wechatpay_public_key_pem', help: 'payment_settings.help_wechatpay_public_key_pem', link: wechatPayDocs, required: true, upload: true },
   ],
   alipay: [
-    { key: 'app_id', label: 'payment_settings.app_id', required: true },
-    { key: 'gateway_url', label: 'payment_settings.gateway_url', required: false },
-    { key: 'seller_id', label: 'payment_settings.seller_id', required: false },
-    { key: 'app_private_key_pem', label: 'payment_settings.app_private_key_pem', required: true, secret: true },
-    { key: 'alipay_public_key_pem', label: 'payment_settings.alipay_public_key_pem', required: true, secret: true },
+    { key: 'app_id', label: 'payment_settings.app_id', help: 'payment_settings.help_alipay_app_id', link: alipayPagePayDocs, required: true },
+    { key: 'gateway_url', label: 'payment_settings.gateway_url', help: 'payment_settings.help_alipay_gateway_url', link: alipayPagePayDocs, required: false },
+    { key: 'seller_id', label: 'payment_settings.seller_id', help: 'payment_settings.help_seller_id', link: alipayPagePayDocs, required: false },
+    { key: 'app_private_key_pem', label: 'payment_settings.app_private_key_pem', help: 'payment_settings.help_app_private_key_pem', link: alipayKeyDocs, required: true, upload: true },
+    { key: 'alipay_public_key_pem', label: 'payment_settings.alipay_public_key_pem', help: 'payment_settings.help_alipay_public_key_pem', link: alipayKeyDocs, required: true, upload: true },
   ],
 }
 
 const activeFields = computed(() => configFields[form.provider])
-const activeTextFields = computed(() => activeFields.value.filter(field => !field.secret))
-const activeSecretFields = computed(() => activeFields.value.filter(field => field.secret))
 
 function defaultConfig(provider: PaymentProvider): PaymentChannelConfig {
   if (provider === 'wechat') {
@@ -222,9 +232,10 @@ function defaultConfig(provider: PaymentProvider): PaymentChannelConfig {
       app_id: '',
       mch_id: '',
       merchant_serial_no: '',
+      wechatpay_public_key_id: '',
       merchant_private_key_pem: '',
       api_v3_key: '',
-      platform_public_key_pem: '',
+      wechatpay_public_key_pem: '',
       api_base_url: 'https://api.mch.weixin.qq.com',
     }
   }

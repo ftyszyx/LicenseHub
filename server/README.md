@@ -63,8 +63,11 @@ Payment channels are configured in Admin > Payment Settings and stored in the da
 for channel configuration anymore.
 
 Create one or more channels in the admin UI. Currently supported providers are WeChat Pay Native and
-Alipay PC website pay. Merchant private keys, WeChat platform public keys, Alipay app private keys,
-and Alipay public keys are uploaded or pasted as PEM text and saved in the database.
+Alipay PC website pay. WeChat merchant private keys, WeChat Pay public keys, Alipay app private keys,
+and Alipay public keys are uploaded or pasted as PEM text and saved in the database. The WeChat merchant
+private key is the full `apiclient_key.pem` content; the API v3 key is the 32-character string configured in
+the WeChat Pay merchant platform. WeChat notification verification uses the new WeChat Pay public key
+mode and requires the paired `wechatpay_public_key_id`.
 
 Notify URL pattern:
 

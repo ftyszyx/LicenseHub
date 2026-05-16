@@ -109,9 +109,10 @@ export interface WeChatPaymentConfig {
   app_id: string
   mch_id: string
   merchant_serial_no: string
+  wechatpay_public_key_id: string
   merchant_private_key_pem: string
   api_v3_key: string
-  platform_public_key_pem: string
+  wechatpay_public_key_pem: string
   api_base_url: string
 }
 

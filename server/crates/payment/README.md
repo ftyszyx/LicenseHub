@@ -5,6 +5,10 @@ Payment providers are exposed through the `PaymentAdapter` trait so the app serv
 ## WeChat Native
 
 `WechatNativeAdapter` supports WeChat Pay V3 Native order creation and payment notifications.
+It uses the new WeChat Pay public key mode for notification signature verification, so callers must
+provide both `wechatpay_public_key_id` and `wechatpay_public_key_pem`. The merchant private key is
+the full `apiclient_key.pem` PEM content; `api_v3_key` is the separate 32-character string used for
+resource decryption.
 
 ## Alipay Page Pay
 
