@@ -2,3 +2,4 @@ server/.env
 pub/.env
 .env
 target/
+keys/
