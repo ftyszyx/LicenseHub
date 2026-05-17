@@ -52,6 +52,11 @@
     "register_failed": "注册失败，请重试"
   },
   "menu": {
+    "console": "管理控制台",
+    "group_overview": "概览",
+    "group_business": "业务管理",
+    "group_license": "授权管理",
+    "group_system": "系统管理",
     "dashboard": "仪表盘",
     "apps": "应用",
     "products": "商品",

@@ -16,7 +16,6 @@
       <span>{{ $t(item.label) }}</span>
     </el-menu-item>
   </template>
-  
 </template>
 
 <script setup lang="ts">

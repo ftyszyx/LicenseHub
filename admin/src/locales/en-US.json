@@ -71,6 +71,11 @@
     "title": "LicenseHub Admin"
   },
   "menu": {
+    "console": "Admin Console",
+    "group_overview": "Overview",
+    "group_business": "Business",
+    "group_license": "Licensing",
+    "group_system": "System",
     "dashboard": "Dashboard",
     "apps": "Apps",
     "reg_codes": "Registration Codes",

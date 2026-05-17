@@ -1,10 +1,10 @@
 <template>
-  <div class="flex h-screen bg-gray-100">
-    <aside class="w-64 bg-gray-800 text-white flex flex-col">
+  <div class="flex h-screen bg-slate-100">
+    <aside class="flex w-64 flex-col border-r border-slate-200 bg-white">
       <AppSidebarMenu class="flex-1" />
     </aside>
-    <main class="flex-1 p-6 overflow-auto">
-      <div class="flex items-center justify-end gap-3 mb-4">
+    <main class="flex-1 overflow-auto p-6">
+      <div class="mb-4 flex items-center justify-end gap-3">
         <el-dropdown @command="onLangCommand">
           <el-button text>{{ currentLocaleLabel }}</el-button>
           <template #dropdown>
@@ -80,4 +80,4 @@ function onSettingsCommand(cmd: string){ if(cmd==='pwd'){ openChangePwd() } else
 </script>
 
 <style>
-</style> 
+</style>
