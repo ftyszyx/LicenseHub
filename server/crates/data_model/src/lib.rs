@@ -9,6 +9,7 @@ pub mod prelude;
 pub mod reg_codes;
 pub mod role_permissions;
 pub mod roles;
+pub mod system_settings;
 pub mod use_records;
 pub mod user_roles;
 pub mod users;

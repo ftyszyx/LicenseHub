@@ -1,6 +1,7 @@
 pub mod app_handler;
 pub mod auth;
 pub mod auth_middleware;
+pub mod dashboard_handler;
 pub mod device_handler;
 pub mod list_api;
 pub mod log_middleware;
@@ -8,5 +9,6 @@ pub mod payment_handler;
 pub mod permission_handler;
 pub mod reg_codes_handler;
 pub mod role_handler;
+pub mod system_settings_handler;
 pub mod use_record_handler;
 pub mod user_handler;

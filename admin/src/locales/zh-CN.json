@@ -27,6 +27,7 @@
     "copy_failed": "复制失败",
     "copy": "复制",
     "generate": "生成",
+    "refresh": "刷新",
     "settings": "设置",
     "delete_confirm": "确认删除",
     "name": "名称",
@@ -63,14 +64,26 @@
     "devices": "设备",
     "permissions": "权限",
     "reg_test": "接口测试",
-    "use_records": "使用记录"
+    "use_records": "使用记录",
+    "system_settings": "系统设置"
   },
   "dashboard": {
     "title": "仪表盘",
+    "subtitle": "查看商城收入、订单和用户的实时概览",
     "total_revenue": "总收入",
     "total_orders": "总订单",
     "total_users": "总用户数",
-    "new_orders": "新增订单"
+    "new_orders": "新增订单",
+    "active_products": "上架商品",
+    "order_status": "订单状态",
+    "recent_orders": "最近订单",
+    "view_all": "查看全部",
+    "no_orders": "暂无订单",
+    "revenue_note": "仅统计已完成订单",
+    "orders_note": "今日新增 {count} 单",
+    "new_orders_note": "今日 00:00 后创建",
+    "users_note": "后台和注册用户总数",
+    "products_note": "当前可购买套餐数量"
   },
   "users": {
     "title": "用户管理",
@@ -296,5 +309,11 @@
     "expire_time": "过期时间",
     "remaining": "剩余次数",
     "apptitle": "应用信息"
+  },
+  "system_settings": {
+    "title": "系统设置",
+    "storefront_title": "商城首页标题",
+    "storefront_title_placeholder": "请输入商城首页标题",
+    "storefront_title_help": "显示在商城首页左上角的品牌标题。"
   }
 }

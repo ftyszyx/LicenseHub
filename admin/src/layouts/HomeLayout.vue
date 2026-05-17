@@ -1,14 +1,27 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { fetchSiteSettings } from '@/apis/system_settings'
 import { RoutePath } from '@/types/route'
 
 const authStore = useAuthStore()
+const storefrontTitle = ref('LicenseHub')
 
 const adminRoute = computed(() => (
   authStore.isAuthenticated ? RoutePath.AdminDashboard : RoutePath.Login
 ))
+
+async function loadSiteSettings() {
+  try {
+    const settings = await fetchSiteSettings()
+    storefrontTitle.value = settings.storefront_title || 'LicenseHub'
+  } catch {
+    storefrontTitle.value = 'LicenseHub'
+  }
+}
+
+onMounted(loadSiteSettings)
 </script>
 
 <template>
@@ -19,7 +32,7 @@ const adminRoute = computed(() => (
           <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-sm font-semibold text-white">
             LH
           </span>
-          <span class="text-base font-semibold tracking-normal">LicenseHub</span>
+          <span class="text-base font-semibold tracking-normal">{{ storefrontTitle }}</span>
         </RouterLink>
 
         <div class="flex items-center rounded-lg bg-slate-100 p-1">

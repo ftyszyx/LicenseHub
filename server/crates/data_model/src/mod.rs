@@ -12,6 +12,7 @@ pub mod payment_channels;
 pub mod reg_codes;
 pub mod role_permissions;
 pub mod roles;
+pub mod system_settings;
 pub mod user_roles;
 pub mod use_records;
 pub mod users;

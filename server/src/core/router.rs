@@ -19,6 +19,11 @@ pub fn create_router(app_state: AppState) -> Service {
         .hoop(auth_middleware::error_handler)
         .push(Router::with_path("me").get(apis::auth::get_current_user))
         .push(Router::with_path("me/permissions").get(apis::auth::get_my_permissions))
+        .push(
+            Router::with_path("dashboard")
+                .hoop(RequirePerm::new("dashboard", "READ"))
+                .get(apis::dashboard_handler::get_dashboard_stats),
+        )
         //permissions
         .push(
             Router::with_path("permissions/list")
@@ -164,6 +169,16 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("payment_settings", "DELETE"))
                 .delete(apis::payment_handler::delete_payment_channel),
         )
+        .push(
+            Router::with_path("system-settings")
+                .hoop(RequirePerm::new("system_settings", "READ"))
+                .get(apis::system_settings_handler::get_system_settings),
+        )
+        .push(
+            Router::with_path("system-settings")
+                .hoop(RequirePerm::new("system_settings", "UPDATE"))
+                .put(apis::system_settings_handler::update_system_settings),
+        )
         //reg_codes
         .push(
             Router::with_path("reg_codes")
@@ -224,6 +239,10 @@ pub fn create_router(app_state: AppState) -> Service {
         .hoop(affix_state::inject(app_state))
         .push(Router::with_path("/api/login").post(apis::auth::login))
         .get(health_check)
+        .push(
+            Router::with_path("/api/site-settings")
+                .get(apis::system_settings_handler::get_public_site_settings),
+        )
         .push(Router::with_path("/api/products").get(apis::payment_handler::list_public_plans))
         .push(Router::with_path("/api/pay/methods").get(apis::payment_handler::list_pay_methods))
         .push(Router::with_path("/api/orders").post(apis::payment_handler::create_order))

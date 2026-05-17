@@ -10,6 +10,7 @@ pub use super::permissions::Entity as Permissions;
 pub use super::reg_codes::Entity as RegCodes;
 pub use super::role_permissions::Entity as RolePermissions;
 pub use super::roles::Entity as Roles;
+pub use super::system_settings::Entity as SystemSettings;
 pub use super::use_records::Entity as UseRecords;
 pub use super::user_roles::Entity as UserRoles;
 pub use super::users::Entity as Users;

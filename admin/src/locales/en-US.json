@@ -43,6 +43,7 @@
     "search_by_name": "Search by name",
     "new": "New",
     "generate": "Generate",
+    "refresh": "Refresh",
     "settings": "Settings",
     "delete_confirm": "",
     "name": "",
@@ -82,7 +83,8 @@
     "devices": "Devices",
     "permissions": "Permissions",
     "reg_test": "API Test",
-    "use_records": "Use Records"
+    "use_records": "Use Records",
+    "system_settings": "System Settings"
   },
   "users": {
     "title": "User Management",
@@ -203,10 +205,21 @@
   },
   "dashboard": {
     "title": "Dashboard",
+    "subtitle": "Live overview of storefront revenue, orders, and users",
     "total_revenue": "Total revenue",
     "total_orders": "Total orders",
     "total_users": "Total users",
-    "new_orders": "New orders"
+    "new_orders": "New orders",
+    "active_products": "Active products",
+    "order_status": "Order status",
+    "recent_orders": "Recent orders",
+    "view_all": "View all",
+    "no_orders": "No orders",
+    "revenue_note": "Delivered orders only",
+    "orders_note": "{count} new today",
+    "new_orders_note": "Created after 00:00 today",
+    "users_note": "All admin and registered users",
+    "products_note": "Currently purchasable plans"
   },
   "apps": {
     "input_name": "Enter name",
@@ -289,5 +302,11 @@
     "expire_time": "",
     "remaining": "Remaining",
     "apptitle": ""
+  },
+  "system_settings": {
+    "title": "System Settings",
+    "storefront_title": "Storefront title",
+    "storefront_title_placeholder": "Enter storefront title",
+    "storefront_title_help": "Shown as the brand title in the storefront header."
   }
 }
