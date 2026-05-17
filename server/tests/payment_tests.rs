@@ -263,12 +263,6 @@ async fn test_admin_payment_channels_crud() {
             .unwrap(),
         "PUB_KEY_ID_0114236900992025041500086300000000"
     );
-    assert!(
-        json["data"]["config"]
-            .get("platform_public_key_pem")
-            .is_none()
-    );
-
     let legacy_wechat_pay_type = helpers::unique_name("wechat_legacy_test")
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
@@ -289,7 +283,8 @@ async fn test_admin_payment_channels_crud() {
             "merchant_serial_no": "LEGACY123456",
             "merchant_private_key_pem": "-----BEGIN PRIVATE KEY-----\\nlegacy\\n-----END PRIVATE KEY-----",
             "api_v3_key": "12345678901234567890123456789012",
-            "platform_public_key_pem": "-----BEGIN PUBLIC KEY-----\\nlegacy\\n-----END PUBLIC KEY-----",
+            "wechatpay_public_key_id": "PUB_KEY_ID_0114236900992025041500086300000002",
+            "wechatpay_public_key_pem": "-----BEGIN PUBLIC KEY-----\\nlegacy\\n-----END PUBLIC KEY-----",
             "api_base_url": ""
         })
         .to_string(),
@@ -323,6 +318,6 @@ async fn test_admin_payment_channels_crud() {
         legacy["config"]["wechatpay_public_key_id"]
             .as_str()
             .unwrap(),
-        ""
+        "PUB_KEY_ID_0114236900992025041500086300000002"
     );
 }

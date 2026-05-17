@@ -1415,9 +1415,7 @@ fn response_channel_config(provider: &str, config: &Value) -> Result<Value, AppE
             "merchant_private_key_pem": config_text(config, "merchant_private_key_pem"),
             "api_v3_key": config_text(config, "api_v3_key"),
             "wechatpay_public_key_id": config_text(config, "wechatpay_public_key_id"),
-            "wechatpay_public_key_pem": non_empty_string(config_text(config, "wechatpay_public_key_pem"))
-                .or_else(|| non_empty_string(config_text(config, "platform_public_key_pem")))
-                .unwrap_or_default(),
+            "wechatpay_public_key_pem": config_text(config, "wechatpay_public_key_pem"),
             "api_base_url": non_empty_string(config_text(config, "api_base_url"))
                 .unwrap_or_else(|| DEFAULT_WECHAT_API_BASE_URL.to_string()),
         })),
