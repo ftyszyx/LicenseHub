@@ -88,12 +88,9 @@
         <el-form-item :label="$t('reg_codes.quantity')"><el-input-number v-model.number="batch.quantity"
             :min="1" /></el-form-item>
         <el-form-item :label="$t('reg_codes.type')">
-          <el-radio-group v-model="batch.code_type">
-            <el-radio :label="RegCodeType.Time">{{ $t('reg_codes.type_time') }}</el-radio>
-            <el-radio :label="RegCodeType.Count">{{ $t('reg_codes.type_count') }}</el-radio>
-          </el-radio-group>
+          <el-tag effect="light">{{ batchCodeTypeLabel }}</el-tag>
         </el-form-item>
-        <el-form-item v-if="batch.code_type === 0" :label="$t('reg_codes.valid_days')"><el-input-number
+        <el-form-item v-if="batch.code_type === RegCodeType.Time" :label="$t('reg_codes.valid_days')"><el-input-number
             v-model.number="batch.valid_days" :min="1" /></el-form-item>
         <el-form-item v-else :label="$t('reg_codes.total_count')"><el-input-number v-model.number="batch.total_count"
             :min="1" /></el-form-item>
@@ -107,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { fetchRegCodes, deleteRegCode, batchCreateRegCodes, updateRegCodeStatus } from '@/apis/reg_codes'
 import { fetchApps } from '@/apis/apps'
 import type { RegCodeModel, ListRegCodesParams, BatchCreateRegCodesReq } from '@/types/reg_codes'
@@ -133,7 +130,7 @@ function statusTagType(status: RegCodeStatus) {
 }
 
 const rows = ref<RegCodeModel[]>([])
-const appOptions = ref<{ id: number, name: string }[]>([])
+const appOptions = ref<{ id: number, name: string, code_type: RegCodeType }[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -191,8 +188,30 @@ function exportCsv() {
 }
 
 const batch = reactive<BatchCreateRegCodesReq & { visible: boolean }>({ visible: false, app_id: 0, quantity: 10, code_type: 0, valid_days: 7, total_count: 1 })
-function openBatchDialog() { if ((!batch.app_id || batch.app_id === 0) && appOptions.value.length) { batch.app_id = appOptions.value[0].id } batch.visible = true }
+const selectedBatchApp = computed(() => appOptions.value.find(app => app.id === batch.app_id) || null)
+const batchCodeTypeLabel = computed(() => batch.code_type === RegCodeType.Time ? t('reg_codes.type_time') : t('reg_codes.type_count'))
+
+function applyBatchAppType() {
+  const app = selectedBatchApp.value
+  if (!app) return
+  batch.code_type = app.code_type
+  if (app.code_type === RegCodeType.Time) {
+    batch.valid_days = batch.valid_days && batch.valid_days > 0 ? batch.valid_days : 7
+    batch.total_count = null
+    return
+  }
+  batch.valid_days = null
+  batch.total_count = batch.total_count && batch.total_count > 0 ? batch.total_count : 1
+}
+function openBatchDialog() {
+  if ((!batch.app_id || batch.app_id === 0) && appOptions.value.length) {
+    batch.app_id = appOptions.value[0].id
+  }
+  applyBatchAppType()
+  batch.visible = true
+}
 async function submitBatch() {
+  applyBatchAppType()
   await batchCreateRegCodes(batch)
   batch.visible = false
   ElMessage.success(t('common.created'))
@@ -205,9 +224,12 @@ onMounted(async () => { await loadApps(); await reload() })
 
 async function loadApps() {
   const data = await fetchApps({ page: 1, page_size: 1000 })
-  appOptions.value = data.list.map((a: any) => ({ id: a.id, name: a.name }))
+  appOptions.value = data.list.map((a: any) => ({ id: a.id, name: a.name, code_type: a.code_type as RegCodeType }))
   if ((!batch.app_id || batch.app_id === 0) && appOptions.value.length) { batch.app_id = appOptions.value[0].id }
+  applyBatchAppType()
 }
+
+watch(() => batch.app_id, applyBatchAppType)
 </script>
 
 <style scoped></style>

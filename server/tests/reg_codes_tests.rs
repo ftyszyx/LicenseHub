@@ -130,6 +130,74 @@ async fn test_count_reg_code_becomes_binded_after_validate() {
 }
 
 #[tokio::test]
+async fn test_reg_code_type_must_match_app_type() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let create_app_body = json!({
+        "name": helpers::unique_name("CountOnlyApp"),
+        "app_id": helpers::unique_name("com.count.only"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": helpers::unique_name("COUNTONLYKEY"),
+        "code_type": 1,
+        "trial_num": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_count_only_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let mismatched_body = json!({
+        "code": helpers::unique_name("MISMATCH"),
+        "app_id": app_id,
+        "valid_days": 7,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 0
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&mismatched_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_mismatched_reg_code").await;
+    assert!(!json["success"].as_bool().unwrap());
+
+    let count_body = json!({
+        "code": helpers::unique_name("COUNTMATCH"),
+        "app_id": app_id,
+        "valid_days": 30,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 1,
+        "total_count": 2
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&count_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_matching_count_reg_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["code_type"].as_i64().unwrap(), 1);
+    assert_eq!(json["data"]["valid_days"].as_i64().unwrap(), 0);
+    assert_eq!(json["data"]["total_count"].as_i64().unwrap(), 2);
+}
+
+#[tokio::test]
 async fn test_count_bind_check_usecount_and_use_records() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;

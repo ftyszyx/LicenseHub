@@ -265,15 +265,23 @@ pub async fn add(
 }
 
 pub async fn add_impl(state: &AppState, req: CreateRegCodeReq) -> Result<RegCodeInfo, AppError> {
+    let (code_type, valid_days, total_count) = normalize_reg_code_limits_for_app(
+        state,
+        req.app_id,
+        req.code_type,
+        req.valid_days,
+        req.total_count,
+    )
+    .await?;
     let now = Utc::now().fixed_offset();
     let active_model = reg_codes::ActiveModel {
         code: Set(req.code),
         app_id: Set(req.app_id),
-        valid_days: Set(req.valid_days),
+        valid_days: Set(valid_days),
         max_devices: Set(req.max_devices),
         status: Set(i16::from(req.status)),
-        code_type: Set(i16::from(req.code_type)),
-        total_count: Set(req.total_count),
+        code_type: Set(i16::from(code_type)),
+        total_count: Set(total_count),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -316,29 +324,35 @@ pub async fn update_impl(
     let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
     let reg_code =
         reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+    let final_app_id = req.app_id.unwrap_or(reg_code.app_id);
+    let final_code_type = req
+        .code_type
+        .unwrap_or_else(|| CodeType::from(reg_code.code_type));
+    let final_valid_days = req.valid_days.unwrap_or(reg_code.valid_days);
+    let final_total_count = req.total_count.or(reg_code.total_count);
+    let (code_type, valid_days, total_count) = normalize_reg_code_limits_for_app(
+        state,
+        final_app_id,
+        final_code_type,
+        final_valid_days,
+        final_total_count,
+    )
+    .await?;
 
     let mut reg_code: reg_codes::ActiveModel = reg_code.into_active_model();
     if let Some(v) = req.code {
         reg_code.code = Set(v);
     }
-    if let Some(v) = req.app_id {
-        reg_code.app_id = Set(v);
-    }
-    if let Some(v) = req.valid_days {
-        reg_code.valid_days = Set(v);
-    }
+    reg_code.app_id = Set(final_app_id);
+    reg_code.valid_days = Set(valid_days);
     if let Some(v) = req.max_devices {
         reg_code.max_devices = Set(v);
     }
     if let Some(v) = req.status {
         reg_code.status = Set(v);
     }
-    if let Some(v) = req.code_type {
-        reg_code.code_type = Set(i16::from(v));
-    }
-    if let Some(v) = req.total_count {
-        reg_code.total_count = Set(Some(v));
-    }
+    reg_code.code_type = Set(i16::from(code_type));
+    reg_code.total_count = Set(total_count);
     reg_code.updated_at = Set(Utc::now().fixed_offset());
 
     let updated_reg_code = reg_code.update(&state.db).await?;
@@ -356,6 +370,39 @@ pub async fn update_impl(
             "reg_codes".to_string(),
             Some(updated_reg_code.id),
         )),
+    }
+}
+
+async fn normalize_reg_code_limits_for_app(
+    state: &AppState,
+    app_id: i32,
+    code_type: CodeType,
+    valid_days: i32,
+    total_count: Option<i32>,
+) -> Result<(CodeType, i32, Option<i32>), AppError> {
+    let app = apps::Entity::find_by_id(app_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("apps".to_string(), Some(app_id)))?;
+    if CodeType::from(app.code_type) != code_type {
+        return Err(AppError::validation(
+            "reg_code code_type must match app code_type",
+        ));
+    }
+    match code_type {
+        CodeType::Time => {
+            if valid_days <= 0 {
+                return Err(AppError::validation("valid_days must be greater than 0"));
+            }
+            Ok((code_type, valid_days, None))
+        }
+        CodeType::Count => {
+            let total_count = total_count.unwrap_or(0);
+            if total_count <= 0 {
+                return Err(AppError::validation("total_count must be greater than 0"));
+            }
+            Ok((code_type, 0, Some(total_count)))
+        }
     }
 }
 
