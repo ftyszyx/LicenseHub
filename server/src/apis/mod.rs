@@ -12,3 +12,4 @@ pub mod role_handler;
 pub mod system_settings_handler;
 pub mod use_record_handler;
 pub mod user_handler;
+pub mod version_sync_handler;

@@ -3,6 +3,7 @@
 pub mod prelude;
 
 pub mod app_devices;
+pub mod app_version_sync_logs;
 pub mod apps;
 pub mod license_plans;
 pub mod order_events;
@@ -12,6 +13,7 @@ pub mod payment_channels;
 pub mod reg_codes;
 pub mod role_permissions;
 pub mod roles;
+pub mod storage_channels;
 pub mod system_settings;
 pub mod user_roles;
 pub mod use_records;

@@ -33,6 +33,11 @@ async fn test_create_app() {
         "app_download_url": "https://example.com/download",
         "app_res_url": "https://example.com/resources",
         "app_update_info": "Test app for automated testing",
+        "manifest_extra": {
+            "channel": "stable",
+            "force_update": false,
+            "min_version_code": 1
+        },
         "sort_order": 1,
         "status": 1
     });
@@ -47,6 +52,18 @@ async fn test_create_app() {
     assert!(bodyjson["success"].as_bool().unwrap());
     assert!(bodyjson["data"]["id"].is_number());
     assert!(bodyjson["data"]["name"].is_string());
+    assert_eq!(
+        bodyjson["data"]["manifest_extra"]["channel"]
+            .as_str()
+            .unwrap(),
+        "stable"
+    );
+    assert_eq!(
+        bodyjson["data"]["manifest_extra"]["force_update"]
+            .as_bool()
+            .unwrap(),
+        false
+    );
 }
 
 #[tokio::test]

@@ -14,6 +14,8 @@ export interface AppModel {
     trial_days: number
     trial_num: number
     sort_order: number
+    manifest_extra?: Record<string, unknown> | null
+    manifest_urls?: AppManifestUrl[]
     status: number
     created_at: string
     updated_at: string
@@ -39,7 +41,17 @@ export interface AddAppReq {
     trial_days?: number | null
     trial_num?: number | null
     sort_order: number
+    manifest_extra?: Record<string, unknown>
     status: number
+}
+
+export interface AppManifestUrl {
+    channel_id: number
+    channel_name: string
+    provider: string
+    public_url: string
+    object_key: string
+    synced_at: string
 }
 
 export interface UpdateAppReq {
@@ -55,5 +67,6 @@ export interface UpdateAppReq {
     trial_days?: number | null
     trial_num?: number | null
     sort_order?: number
+    manifest_extra?: Record<string, unknown>
     status?: number
 }

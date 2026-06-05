@@ -17,6 +17,8 @@ pub struct Model {
     pub app_res_url: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub app_update_info: Option<String>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub manifest_extra: Json,
     pub code_type: i16,
     pub app_valid_key: String,
     pub trial_days: i32,

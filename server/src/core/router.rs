@@ -170,6 +170,41 @@ pub fn create_router(app_state: AppState) -> Service {
                 .delete(apis::payment_handler::delete_payment_channel),
         )
         .push(
+            Router::with_path("storage-channels")
+                .hoop(RequirePerm::new("storage_channels", "CREATE"))
+                .post(apis::version_sync_handler::create_storage_channel),
+        )
+        .push(
+            Router::with_path("storage-channels/list")
+                .hoop(RequirePerm::new("storage_channels", "READ"))
+                .get(apis::version_sync_handler::list_storage_channels),
+        )
+        .push(
+            Router::with_path("storage-channels/{id}")
+                .hoop(RequirePerm::new("storage_channels", "UPDATE"))
+                .put(apis::version_sync_handler::update_storage_channel),
+        )
+        .push(
+            Router::with_path("storage-channels/{id}")
+                .hoop(RequirePerm::new("storage_channels", "DELETE"))
+                .delete(apis::version_sync_handler::delete_storage_channel),
+        )
+        .push(
+            Router::with_path("apps/{id}/version-manifest")
+                .hoop(RequirePerm::new("version_sync", "READ"))
+                .get(apis::version_sync_handler::get_version_manifest),
+        )
+        .push(
+            Router::with_path("apps/{id}/sync-version")
+                .hoop(RequirePerm::new("version_sync", "CREATE"))
+                .post(apis::version_sync_handler::sync_app_version),
+        )
+        .push(
+            Router::with_path("version-sync-logs")
+                .hoop(RequirePerm::new("version_sync", "READ"))
+                .get(apis::version_sync_handler::list_version_sync_logs),
+        )
+        .push(
             Router::with_path("system-settings")
                 .hoop(RequirePerm::new("system_settings", "READ"))
                 .get(apis::system_settings_handler::get_system_settings),
