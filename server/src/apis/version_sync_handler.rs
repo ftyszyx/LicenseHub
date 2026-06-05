@@ -458,7 +458,9 @@ async fn find_channels_for_sync(
         query = query
             .filter(storage_channels::Column::Status.eq(i16::from(StorageChannelStatus::Enabled)));
     } else {
-        query = query.filter(storage_channels::Column::Id.is_in(channel_ids));
+        query = query
+            .filter(storage_channels::Column::Id.is_in(channel_ids))
+            .filter(storage_channels::Column::Status.eq(i16::from(StorageChannelStatus::Enabled)));
     }
     Ok(query.all(&state.db).await?)
 }

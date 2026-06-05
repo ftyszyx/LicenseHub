@@ -256,6 +256,19 @@ async fn test_version_manifest_preview_and_manual_sync_logs() {
             .all(|item| item["channel_id"].as_i64() != Some(disabled_channel_id as i64))
     );
 
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/apps/{}/sync-version",
+        app_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({ "channel_ids": [disabled_channel_id] }))
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "sync_disabled_channel_by_id").await;
+    assert!(!json["success"].as_bool().unwrap());
+    assert_eq!(json["code"].as_i64().unwrap(), 5004);
+
     let resp = TestClient::get(helpers::get_url(&format!(
         "/api/admin/version-sync-logs?page=1&page_size=20&app_id={}",
         app_id

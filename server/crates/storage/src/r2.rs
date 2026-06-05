@@ -34,16 +34,7 @@ async fn upload_s3_compatible(
 ) -> Result<UploadResult, StorageError> {
     let region = config.region.as_deref().unwrap_or("auto");
     let payload_sha256 = hex::encode(Sha256::digest(body));
-    let url = format!(
-        "{}/{}/{}",
-        config.endpoint.trim_end_matches('/'),
-        path_segment(&config.bucket),
-        object_key
-            .split('/')
-            .map(path_segment)
-            .collect::<Vec<_>>()
-            .join("/")
-    );
+    let url = build_s3_compatible_object_url(&config.endpoint, &config.bucket, object_key);
     let credentials = Credentials::new(
         config.access_key_id.clone(),
         config.access_key_secret.clone(),
@@ -119,4 +110,53 @@ async fn upload_s3_compatible(
         .and_then(|value| value.to_str().ok())
         .map(|value| value.trim_matches('"').to_string());
     Ok(UploadResult { etag })
+}
+
+fn build_s3_compatible_object_url(endpoint: &str, bucket: &str, object_key: &str) -> String {
+    let endpoint = endpoint.trim_end_matches('/');
+    let encoded_bucket = path_segment(bucket.trim());
+    let encoded_key = object_key
+        .split('/')
+        .map(path_segment)
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if endpoint
+        .rsplit('/')
+        .next()
+        .is_some_and(|segment| segment == bucket.trim() || segment == encoded_bucket)
+    {
+        format!("{endpoint}/{encoded_key}")
+    } else {
+        format!("{endpoint}/{encoded_bucket}/{encoded_key}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn r2_object_url_appends_bucket_for_root_endpoint() {
+        assert_eq!(
+            build_s3_compatible_object_url(
+                "https://account.r2.cloudflarestorage.com",
+                "apphub",
+                "apps/NAE2W1U7444J/latest.json"
+            ),
+            "https://account.r2.cloudflarestorage.com/apphub/apps/NAE2W1U7444J/latest.json"
+        );
+    }
+
+    #[test]
+    fn r2_object_url_does_not_duplicate_bucket_path() {
+        assert_eq!(
+            build_s3_compatible_object_url(
+                "https://account.r2.cloudflarestorage.com/apphub/",
+                "apphub",
+                "apps/NAE2W1U7444J/latest.json"
+            ),
+            "https://account.r2.cloudflarestorage.com/apphub/apps/NAE2W1U7444J/latest.json"
+        );
+    }
 }
