@@ -28,7 +28,7 @@ cargo test --test user_tests -- --test-threads=1
 ### 数据库迁移
 
 ```
-cargo install sqlx-cli
+cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features native-tls,postgres
 ```
 
 数据库迁移

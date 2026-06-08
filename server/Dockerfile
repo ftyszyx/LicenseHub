@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --workspace  \
     && mkdir -p /usr/src/out \
     && cp target/release/${APP_NAME} /usr/src/out/${APP_NAME}
-RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres
+RUN cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features native-tls,postgres
 
 FROM debian:bookworm-slim AS runner
 ARG APP_NAME=app_server
