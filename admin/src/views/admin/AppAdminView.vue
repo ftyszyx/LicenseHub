@@ -143,119 +143,127 @@
 
     <el-dialog v-model="dialog.visible" :title="dialog.mode === 'create' ? $t('apps.create_title') : $t('apps.edit_title')" width="960px">
       <el-form ref="formRef" :model="form" label-width="104px" :rules="rules">
-        <div class="max-h-[68vh] overflow-y-auto pr-3">
-          <div class="rounded border border-slate-100 bg-slate-50 px-4 pt-4">
-            <div class="grid grid-cols-2 gap-x-5">
-              <el-form-item :label="$t('apps.name')" prop="name">
-                <el-input v-model="form.name" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.app_id')" prop="app_id">
-                <el-input v-model="form.app_id">
-                  <template #append>
-                    <el-button @click="genAppId">{{ $t('common.generate') }}</el-button>
-                  </template>
-                </el-input>
-              </el-form-item>
-              <el-form-item :label="$t('apps.valid_key')" prop="app_valid_key" class="col-span-2">
-                <el-input v-model="form.app_valid_key">
-                  <template #append>
-                    <el-button @click="genAppKey">{{ $t('common.generate') }}</el-button>
-                  </template>
-                </el-input>
-              </el-form-item>
-              <el-form-item :label="$t('apps.code_type')" prop="code_type">
-                <el-select v-model.number="form.code_type" class="w-full" @change="onCodeTypeChange">
-                  <el-option :label="$t('reg_codes.type_time')" :value="RegCodeType.Time" />
-                  <el-option :label="$t('reg_codes.type_count')" :value="RegCodeType.Count" />
-                </el-select>
-              </el-form-item>
-              <el-form-item v-if="form.code_type === RegCodeType.Time" :label="$t('apps.trial_days')" prop="trial_days">
-                <el-input-number v-model.number="form.trial_days" :min="0" class="w-full" />
-              </el-form-item>
-              <el-form-item v-if="form.code_type === RegCodeType.Count" :label="$t('apps.trial_num')" prop="trial_num">
-                <el-input-number v-model.number="form.trial_num" :min="0" class="w-full" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.sort_order')" prop="sort_order">
-                <el-input-number v-model="form.sort_order" :min="0" class="w-full" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.status')" prop="status">
-                <el-select v-model="form.status" class="w-full">
-                  <el-option :label="$t('apps.enabled')" :value="1" />
-                  <el-option :label="$t('apps.disabled')" :value="0" />
-                </el-select>
-              </el-form-item>
-            </div>
-          </div>
-
-          <el-divider content-position="left">{{ $t('apps.version_sync_info') }}</el-divider>
-
-          <div class="rounded border border-slate-100 bg-slate-50 px-4 pt-4">
-            <div class="grid grid-cols-2 gap-x-5">
-              <el-form-item :label="$t('apps.version_name')" prop="app_vername">
-                <el-input v-model="form.app_vername" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.version_code')" prop="app_vercode">
-                <el-input-number v-model.number="form.app_vercode" :min="0" class="w-full" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.download_url')" prop="app_download_url">
-                <el-input v-model="form.app_download_url" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.resource_url')" prop="app_res_url">
-                <el-input v-model="form.app_res_url" />
-              </el-form-item>
-              <el-form-item :label="$t('apps.update_info')" prop="app_update_info" class="col-span-2">
-                <el-input v-model="form.app_update_info" type="textarea" :rows="4" resize="vertical" />
-              </el-form-item>
-            </div>
-          </div>
-
-          <el-divider content-position="left">{{ $t('apps.manifest_extra') }}</el-divider>
-
-          <div class="rounded border border-slate-200 bg-white">
-            <div class="grid grid-cols-12 gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">
-              <span class="col-span-3">{{ $t('apps.manifest_extra_key') }}</span>
-              <span class="col-span-2">{{ $t('apps.manifest_extra_type') }}</span>
-              <span class="col-span-6">{{ $t('apps.manifest_extra_value') }}</span>
-              <span class="col-span-1" />
-            </div>
-            <div class="space-y-2 p-3">
-              <div
-                v-for="row in manifestExtraRows"
-                :key="row.id"
-                class="grid grid-cols-12 items-start gap-3"
-              >
-                <el-input v-model="row.key" class="col-span-3" :placeholder="$t('apps.manifest_extra_key_placeholder')" clearable />
-                <el-select v-model="row.type" class="col-span-2" @change="onManifestExtraTypeChange(row)">
-                  <el-option :label="$t('apps.manifest_type_string')" value="string" />
-                  <el-option :label="$t('apps.manifest_type_number')" value="number" />
-                  <el-option :label="$t('apps.manifest_type_boolean')" value="boolean" />
-                  <el-option :label="$t('apps.manifest_type_json')" value="json" />
-                </el-select>
-                <el-select v-if="row.type === 'boolean'" v-model="row.value" class="col-span-6">
-                  <el-option :label="$t('apps.manifest_boolean_true')" value="true" />
-                  <el-option :label="$t('apps.manifest_boolean_false')" value="false" />
-                </el-select>
-                <el-input
-                  v-else-if="row.type === 'json'"
-                  v-model="row.value"
-                  class="col-span-6"
-                  type="textarea"
-                  :rows="2"
-                  resize="vertical"
-                  :placeholder="$t('apps.manifest_extra_json_placeholder')"
-                />
-                <el-input v-else v-model="row.value" class="col-span-6" :placeholder="$t('apps.manifest_extra_value_placeholder')" clearable />
-                <el-button class="col-span-1 w-full" :disabled="manifestExtraRows.length === 1" @click="removeManifestExtraRow(row.id)">
-                  <el-icon><Delete /></el-icon>
-                </el-button>
+        <el-tabs v-model="appDialogTab" type="card" stretch class="app-edit-tabs">
+          <el-tab-pane :label="$t('apps.basic_info')" name="basic">
+            <div class="app-edit-tab-panel">
+              <div class="rounded border border-slate-100 bg-slate-50 px-4 pt-4">
+                <div class="grid grid-cols-2 gap-x-5">
+                  <el-form-item :label="$t('apps.name')" prop="name">
+                    <el-input v-model="form.name" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.app_id')" prop="app_id">
+                    <el-input v-model="form.app_id">
+                      <template #append>
+                        <el-button @click="genAppId">{{ $t('common.generate') }}</el-button>
+                      </template>
+                    </el-input>
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.valid_key')" prop="app_valid_key" class="col-span-2">
+                    <el-input v-model="form.app_valid_key">
+                      <template #append>
+                        <el-button @click="genAppKey">{{ $t('common.generate') }}</el-button>
+                      </template>
+                    </el-input>
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.code_type')" prop="code_type">
+                    <el-select v-model.number="form.code_type" class="w-full" @change="onCodeTypeChange">
+                      <el-option :label="$t('reg_codes.type_time')" :value="RegCodeType.Time" />
+                      <el-option :label="$t('reg_codes.type_count')" :value="RegCodeType.Count" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item v-if="form.code_type === RegCodeType.Time" :label="$t('apps.trial_days')" prop="trial_days">
+                    <el-input-number v-model.number="form.trial_days" :min="0" class="w-full" />
+                  </el-form-item>
+                  <el-form-item v-if="form.code_type === RegCodeType.Count" :label="$t('apps.trial_num')" prop="trial_num">
+                    <el-input-number v-model.number="form.trial_num" :min="0" class="w-full" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.sort_order')" prop="sort_order">
+                    <el-input-number v-model="form.sort_order" :min="0" class="w-full" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.status')" prop="status">
+                    <el-select v-model="form.status" class="w-full">
+                      <el-option :label="$t('apps.enabled')" :value="1" />
+                      <el-option :label="$t('apps.disabled')" :value="0" />
+                    </el-select>
+                  </el-form-item>
+                </div>
               </div>
-              <el-button @click="addManifestExtraRow">
-                <el-icon class="mr-1"><Plus /></el-icon>
-                {{ $t('apps.add_manifest_extra') }}
-              </el-button>
             </div>
-          </div>
-        </div>
+          </el-tab-pane>
+
+          <el-tab-pane :label="$t('apps.version_sync_info')" name="version">
+            <div class="app-edit-tab-panel">
+              <div class="rounded border border-slate-100 bg-slate-50 px-4 pt-4">
+                <div class="grid grid-cols-2 gap-x-5">
+                  <el-form-item :label="$t('apps.version_name')" prop="app_vername">
+                    <el-input v-model="form.app_vername" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.version_code')" prop="app_vercode">
+                    <el-input-number v-model.number="form.app_vercode" :min="0" class="w-full" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.download_url')" prop="app_download_url">
+                    <el-input v-model="form.app_download_url" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.resource_url')" prop="app_res_url">
+                    <el-input v-model="form.app_res_url" />
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.update_info')" prop="app_update_info" class="col-span-2">
+                    <el-input v-model="form.app_update_info" type="textarea" :rows="4" resize="vertical" />
+                  </el-form-item>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane :label="$t('apps.manifest_extra')" name="extra">
+            <div class="app-edit-tab-panel">
+              <div class="rounded border border-slate-200 bg-white">
+                <div class="grid grid-cols-12 gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">
+                  <span class="col-span-3">{{ $t('apps.manifest_extra_key') }}</span>
+                  <span class="col-span-2">{{ $t('apps.manifest_extra_type') }}</span>
+                  <span class="col-span-6">{{ $t('apps.manifest_extra_value') }}</span>
+                  <span class="col-span-1" />
+                </div>
+                <div class="space-y-2 p-3">
+                  <div
+                    v-for="row in manifestExtraRows"
+                    :key="row.id"
+                    class="grid grid-cols-12 items-start gap-3"
+                  >
+                    <el-input v-model="row.key" class="col-span-3" :placeholder="$t('apps.manifest_extra_key_placeholder')" clearable />
+                    <el-select v-model="row.type" class="col-span-2" @change="onManifestExtraTypeChange(row)">
+                      <el-option :label="$t('apps.manifest_type_string')" value="string" />
+                      <el-option :label="$t('apps.manifest_type_number')" value="number" />
+                      <el-option :label="$t('apps.manifest_type_boolean')" value="boolean" />
+                      <el-option :label="$t('apps.manifest_type_json')" value="json" />
+                    </el-select>
+                    <el-select v-if="row.type === 'boolean'" v-model="row.value" class="col-span-6">
+                      <el-option :label="$t('apps.manifest_boolean_true')" value="true" />
+                      <el-option :label="$t('apps.manifest_boolean_false')" value="false" />
+                    </el-select>
+                    <el-input
+                      v-else-if="row.type === 'json'"
+                      v-model="row.value"
+                      class="col-span-6"
+                      type="textarea"
+                      :rows="2"
+                      resize="vertical"
+                      :placeholder="$t('apps.manifest_extra_json_placeholder')"
+                    />
+                    <el-input v-else v-model="row.value" class="col-span-6" :placeholder="$t('apps.manifest_extra_value_placeholder')" clearable />
+                    <el-button class="col-span-1 w-full" :disabled="manifestExtraRows.length === 1" @click="removeManifestExtraRow(row.id)">
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                  <el-button @click="addManifestExtraRow">
+                    <el-icon class="mr-1"><Plus /></el-icon>
+                    {{ $t('apps.add_manifest_extra') }}
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -456,6 +464,7 @@ type ManifestExtraRow = {
   value: string
   type: ManifestExtraType
 }
+type AppDialogTab = 'basic' | 'version' | 'extra'
 
 const apps = ref<AppModel[]>([])
 const page = ref(1)
@@ -470,6 +479,7 @@ const query = reactive({
 })
 
 const dialog = reactive({ visible: false, mode: 'create' as 'create' | 'edit', editingId: undefined as number | undefined })
+const appDialogTab = ref<AppDialogTab>('basic')
 const emptyForm: AddAppReq = {
   name: '',
   app_id: '',
@@ -497,6 +507,14 @@ const rules = reactive<FormRules<AddAppReq>>({
   app_vername: [{ required: true, message: t('apps.input_version_name'), trigger: 'blur' }],
   app_vercode: [{ required: true, message: t('apps.input_version_code'), trigger: 'blur' }],
 })
+
+const appDialogFieldTabs: Record<string, AppDialogTab> = {
+  name: 'basic',
+  app_id: 'basic',
+  app_valid_key: 'basic',
+  app_vername: 'version',
+  app_vercode: 'version',
+}
 
 const enabledChannels = ref<StorageChannel[]>([])
 const syncDialog = reactive({
@@ -659,6 +677,7 @@ const openCreate = () => {
   onCodeTypeChange()
   dialog.mode = 'create'
   dialog.editingId = undefined
+  appDialogTab.value = 'basic'
   dialog.visible = true
   formRef.value?.clearValidate()
 }
@@ -683,6 +702,7 @@ const openEdit = (row: AppModel) => {
   })
   resetManifestExtraRows(row.manifest_extra)
   onCodeTypeChange()
+  appDialogTab.value = 'basic'
   dialog.visible = true
   formRef.value?.clearValidate()
 }
@@ -693,14 +713,27 @@ const openBuyPage = (row: AppModel) => {
 
 const submitForm = async (currentFormRef: FormInstance | undefined) => {
   if (!currentFormRef) return
-  const valid = await currentFormRef.validate()
+  let valid = false
+  try {
+    valid = await currentFormRef.validate()
+  } catch (_error) {
+    valid = false
+  }
   if (!valid) {
+    const invalidField = currentFormRef.fields.find(field => field.validateState === 'error')
+    const invalidTab = invalidField?.propString ? appDialogFieldTabs[invalidField.propString] : undefined
+    if (invalidTab) {
+      appDialogTab.value = invalidTab
+    }
     ElMessage.error(t('common.please_check_form') as string)
     return
   }
 
   const manifestExtra = buildManifestExtra()
-  if (!manifestExtra) return
+  if (!manifestExtra) {
+    appDialogTab.value = 'extra'
+    return
+  }
 
   const payload: AddAppReq = { ...form, manifest_extra: manifestExtra }
   if (dialog.mode === 'create') {
@@ -943,4 +976,19 @@ async function copyManifestUrl(url?: string | null) {
 onMounted(reload)
 </script>
 
-<style scoped></style>
+<style scoped>
+.app-edit-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.app-edit-tabs :deep(.el-tabs__item) {
+  height: 38px;
+  font-weight: 500;
+}
+
+.app-edit-tab-panel {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+</style>
