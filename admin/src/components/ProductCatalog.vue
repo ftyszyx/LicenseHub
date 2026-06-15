@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { toDataURL } from 'qrcode'
 import { createOrder, fetchOrder, fetchPayMethods, fetchPublicPlans } from '@/apis/payments'
-import type { LicensePlan, OrderModel, PayMethodInfo, PayMethodsInfo } from '@/types/payments'
+import type {
+  LicensePlan,
+  OrderModel,
+  PayMethodInfo,
+  PayMethodsInfo,
+  PublicPlansInfo,
+  PublicPlansState,
+} from '@/types/payments'
 import { OrderStatus } from '@/types/payments'
 import { RegCodeType } from '@/types/reg_codes'
+import { RoutePath } from '@/types'
 
 const props = withDefaults(defineProps<{
   appId?: number | null
@@ -17,6 +27,8 @@ const props = withDefaults(defineProps<{
   title: '',
 })
 
+const { t } = useI18n()
+
 type AppPlanGroup = {
   appId: number
   appName: string
@@ -24,6 +36,8 @@ type AppPlanGroup = {
 }
 
 const plans = ref<LicensePlan[]>([])
+const catalogState = ref<PublicPlansState>('available')
+const catalogAppName = ref<string | null>(null)
 const loading = ref(false)
 const creatingId = ref<number | null>(null)
 const selectedPlan = ref<LicensePlan | null>(null)
@@ -63,6 +77,22 @@ const visiblePlans = computed(() => {
   return activeGroup.value?.plans || []
 })
 
+const unavailableTitle = computed(() => {
+  if (catalogState.value === 'app_disabled') return t('products_page.app_disabled_title')
+  if (catalogState.value === 'app_not_found') return t('products_page.app_not_found_title')
+  return ''
+})
+
+const unavailableDescription = computed(() => {
+  if (catalogState.value === 'app_disabled') {
+    return t('products_page.app_disabled_description', {
+      name: catalogAppName.value || t('products_page.current_app'),
+    })
+  }
+  if (catalogState.value === 'app_not_found') return t('products_page.app_not_found_description')
+  return ''
+})
+
 const activePayUrl = computed(() => {
   const order = activeOrder.value
   return order?.pay_url || order?.url_scheme || ''
@@ -96,38 +126,33 @@ function formatPrice(cents: number) {
 }
 
 function orderStatusLabel(status: OrderStatus) {
-  switch (status) {
-    case OrderStatus.Paid:
-      return '已支付'
-    case OrderStatus.Delivered:
-      return '已完成'
-    case OrderStatus.Failed:
-      return '支付失败'
-    case OrderStatus.Closed:
-      return '已关闭'
-    case OrderStatus.Pending:
-    default:
-      return '待支付'
-  }
+  return t(`orders.status_${status}`)
 }
 
 function planTypeLabel(plan: LicensePlan) {
-  return plan.code_type === RegCodeType.Time ? '时间授权' : '次数授权'
+  return plan.code_type === RegCodeType.Time
+    ? t('products_page.time_license')
+    : t('products_page.count_license')
 }
 
 function planLimit(plan: LicensePlan) {
-  if (plan.code_type === RegCodeType.Time) return `${plan.valid_days} 天`
-  return `${plan.total_count ?? 0} 次`
+  if (plan.code_type === RegCodeType.Time) {
+    return t('products_page.valid_days', { count: plan.valid_days })
+  }
+  return t('products_page.total_count', { count: plan.total_count ?? 0 })
 }
 
 function planDescription(plan: LicensePlan) {
-  return plan.description || '标准授权商品，适合常规激活与续费场景。'
+  return plan.description || t('products_page.default_description')
 }
 
 async function loadPlans() {
   loading.value = true
   try {
-    plans.value = await fetchPublicPlans(props.appId ? { app_id: props.appId } : {})
+    const result: PublicPlansInfo = await fetchPublicPlans(props.appId ? { app_id: props.appId } : {})
+    catalogState.value = result.state
+    catalogAppName.value = result.app_name || null
+    plans.value = result.plans
   } finally {
     loading.value = false
   }
@@ -182,7 +207,7 @@ function startPolling() {
     }
     if (latest.status === OrderStatus.Delivered) {
       stopPolling()
-      ElMessage.success('支付已完成')
+      ElMessage.success(t('products_page.payment_completed'))
     }
   }, 3000)
 }
@@ -199,9 +224,9 @@ function openPayUrl(url: string) {
 async function copy(text: string) {
   try {
     await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
+    ElMessage.success(t('common.copied'))
   } catch {
-    ElMessage.error('复制失败')
+    ElMessage.error(t('common.copy_failed'))
   }
 }
 
@@ -224,38 +249,44 @@ function selectPayMethod(method: PayMethodInfo) {
 function payMethodMeta(method: PayMethodInfo) {
   if (method.pay_type === 'wechat_native') {
     return {
-      name: method.label || '微信支付',
+      name: method.label || t('products_page.pay_wechat_native'),
       icon: '/static/images/pay/wxpay.png',
     }
   }
   if (method.pay_type === 'alipay') {
     return {
-      name: method.label || '支付宝',
+      name: method.label || t('products_page.pay_alipay'),
       icon: '/static/images/pay/alipay.png',
     }
   }
   if (method.pay_type === 'wxpay') {
     return {
-      name: method.label || '微信',
+      name: method.label || t('products_page.pay_wechat'),
       icon: '/static/images/pay/wxpay.png',
     }
   }
   if (method.pay_type === 'qqpay') {
     return {
-      name: method.label || 'QQ 钱包',
+      name: method.label || t('products_page.pay_qq'),
       icon: '/static/images/pay/card.svg',
     }
   }
   if (method.pay_type === 'bank') {
     return {
-      name: method.label || '银行卡',
+      name: method.label || t('products_page.pay_bank'),
       icon: '/static/images/pay/card.svg',
     }
   }
   return {
-    name: method.label || '在线支付',
+    name: method.label || t('products_page.pay_online'),
     icon: '/static/images/pay/card.svg',
   }
+}
+
+function payMethodsMessage(info: PayMethodsInfo | null) {
+  if (info?.message === 'payment is disabled') return t('products_page.payment_disabled')
+  if (info?.message === 'no payment channel is configured') return t('products_page.no_payment_channel')
+  return info?.message || t('products_page.no_pay_methods')
 }
 
 watch(() => props.appId, loadPlans, { immediate: true })
@@ -314,7 +345,17 @@ onBeforeUnmount(stopPolling)
           </div>
         </div>
 
-        <div v-if="visiblePlans.length" class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div v-if="catalogState !== 'available'" class="rounded-lg border border-slate-200 bg-white px-4 py-12">
+          <el-result icon="warning" :title="unavailableTitle" :sub-title="unavailableDescription">
+            <template #extra>
+              <RouterLink v-slot="{ navigate }" custom :to="RoutePath.Home">
+                <el-button type="primary" @click="navigate">{{ $t('products_page.back_home') }}</el-button>
+              </RouterLink>
+            </template>
+          </el-result>
+        </div>
+
+        <div v-else-if="visiblePlans.length" class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <article
             v-for="plan in visiblePlans"
             :key="plan.id"
@@ -334,19 +375,19 @@ onBeforeUnmount(stopPolling)
 
             <div class="mt-5 grid grid-cols-2 gap-3 border-y border-slate-100 py-4">
               <div>
-                <div class="text-xs font-medium text-slate-500">授权额度</div>
+                <div class="text-xs font-medium text-slate-500">{{ $t('products_page.license_quota') }}</div>
                 <div class="mt-1 text-sm font-semibold text-slate-950">{{ planLimit(plan) }}</div>
               </div>
               <div>
-                <div class="text-xs font-medium text-slate-500">交付方式</div>
-                <div class="mt-1 text-sm font-semibold text-slate-950">自动发码</div>
+                <div class="text-xs font-medium text-slate-500">{{ $t('products_page.delivery_method') }}</div>
+                <div class="mt-1 text-sm font-semibold text-slate-950">{{ $t('products_page.auto_delivery') }}</div>
               </div>
             </div>
 
             <div class="mt-auto pt-5">
               <div class="mb-4 flex items-end justify-between gap-3">
                 <div>
-                  <div class="text-xs font-medium text-slate-500">售价</div>
+                  <div class="text-xs font-medium text-slate-500">{{ $t('products_page.sale_price') }}</div>
                   <div class="mt-1 text-3xl font-semibold text-slate-950">
                     <span class="text-base">&yen;</span>{{ formatPrice(plan.price_cents) }}
                   </div>
@@ -358,7 +399,7 @@ onBeforeUnmount(stopPolling)
                 :disabled="creatingId === plan.id"
                 @click="buy(plan)"
               >
-                {{ creatingId === plan.id ? '处理中...' : $t('products_page.buy_now') }}
+                {{ creatingId === plan.id ? $t('products_page.processing') : $t('products_page.buy_now') }}
               </button>
             </div>
           </article>
@@ -368,7 +409,7 @@ onBeforeUnmount(stopPolling)
         </div>
       </template>
 
-      <el-dialog v-model="checkoutDialogVisible" title="确认订单" width="720px">
+      <el-dialog v-model="checkoutDialogVisible" :title="$t('products_page.confirm_order')" width="720px">
         <div v-if="selectedPlan" class="space-y-4">
           <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <div class="flex items-start justify-between gap-4">
@@ -378,12 +419,12 @@ onBeforeUnmount(stopPolling)
                 <div class="mt-2 text-sm text-slate-600">{{ planTypeLabel(selectedPlan) }} · {{ planLimit(selectedPlan) }}</div>
               </div>
               <div class="text-right">
-                <div class="text-xs font-medium text-slate-500">应付金额</div>
+                <div class="text-xs font-medium text-slate-500">{{ $t('products_page.payable_amount') }}</div>
                 <div class="mt-1 text-2xl font-semibold text-slate-950">&yen;{{ formatPrice(selectedPlan.price_cents) }}</div>
               </div>
             </div>
           </div>
-          <div class="text-sm font-semibold text-slate-800">选择支付方式</div>
+          <div class="text-sm font-semibold text-slate-800">{{ $t('products_page.select_pay_method') }}</div>
           <el-skeleton v-if="payMethodsLoading" :rows="2" animated />
           <div v-else-if="enabledPayMethods.length" class="flex flex-wrap gap-2">
             <button
@@ -408,56 +449,56 @@ onBeforeUnmount(stopPolling)
             v-else
             type="warning"
             :closable="false"
-            :title="payMethodsInfo?.message || '当前商户没有可用支付方式'"
+            :title="payMethodsMessage(payMethodsInfo)"
           />
         </div>
         <template #footer>
-          <el-button @click="checkoutDialogVisible = false">取消</el-button>
+          <el-button @click="checkoutDialogVisible = false">{{ $t('common.cancel') }}</el-button>
           <el-button type="primary" class="min-w-32" :disabled="!canConfirmBuy" :loading="creatingId === selectedPlan?.id" @click="confirmBuy">
-            确认购买
+            {{ $t('products_page.confirm_buy') }}
           </el-button>
         </template>
       </el-dialog>
 
-      <el-dialog v-model="orderDialogVisible" title="订单支付" width="560px">
+      <el-dialog v-model="orderDialogVisible" :title="$t('products_page.order_payment')" width="560px">
         <div v-if="activeOrder" class="space-y-4">
           <el-descriptions :column="1" border>
-            <el-descriptions-item label="订单号">
+            <el-descriptions-item :label="$t('orders.order_id')">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-sm">{{ activeOrder.order_no }}</span>
-                <el-button size="small" @click="copy(activeOrder.order_no)">复制</el-button>
+                <el-button size="small" @click="copy(activeOrder.order_no)">{{ $t('common.copy') }}</el-button>
               </div>
             </el-descriptions-item>
-            <el-descriptions-item label="商品">{{ activeOrder.plan_name }}</el-descriptions-item>
-            <el-descriptions-item label="金额">&yen;{{ formatPrice(activeOrder.amount_cents) }}</el-descriptions-item>
-            <el-descriptions-item label="状态">{{ orderStatusLabel(activeOrder.status) }}</el-descriptions-item>
+            <el-descriptions-item :label="$t('products.name')">{{ activeOrder.plan_name }}</el-descriptions-item>
+            <el-descriptions-item :label="$t('products_page.amount')">&yen;{{ formatPrice(activeOrder.amount_cents) }}</el-descriptions-item>
+            <el-descriptions-item :label="$t('orders.status')">{{ orderStatusLabel(activeOrder.status) }}</el-descriptions-item>
           </el-descriptions>
 
           <div v-if="activeQrCodeDataUrl && activeOrder.status !== OrderStatus.Delivered" class="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
             <div class="flex flex-col items-center gap-3 text-center">
-              <img :src="activeQrCodeDataUrl" alt="微信支付二维码" class="h-60 w-60 rounded bg-white p-2 shadow-sm">
+              <img :src="activeQrCodeDataUrl" :alt="$t('products_page.wechat_qr_alt')" class="h-60 w-60 rounded bg-white p-2 shadow-sm">
               <div>
-                <div class="text-sm font-medium text-slate-900">使用微信扫一扫付款</div>
-                <p class="mt-1 text-sm text-slate-600">付款完成后订单会自动刷新并发放注册码。</p>
+                <div class="text-sm font-medium text-slate-900">{{ $t('products_page.scan_wechat') }}</div>
+                <p class="mt-1 text-sm text-slate-600">{{ $t('products_page.auto_refresh_hint') }}</p>
               </div>
             </div>
           </div>
 
           <div v-if="activePayUrl && activeOrder.status !== OrderStatus.Delivered" class="rounded-lg border border-blue-100 bg-blue-50 p-4">
-            <div class="text-sm font-medium text-slate-900">支付页面已打开</div>
-            <p class="mt-1 text-sm text-slate-600">如果浏览器拦截或支付页被关闭，可以重新打开支付页面。</p>
-            <el-button class="mt-3" type="primary" @click="openPayUrl(activePayUrl)">重新打开支付页</el-button>
+            <div class="text-sm font-medium text-slate-900">{{ $t('products_page.pay_page_opened') }}</div>
+            <p class="mt-1 text-sm text-slate-600">{{ $t('products_page.reopen_pay_hint') }}</p>
+            <el-button class="mt-3" type="primary" @click="openPayUrl(activePayUrl)">{{ $t('products_page.reopen_pay_page') }}</el-button>
           </div>
 
-          <el-result v-if="activeOrder.status === OrderStatus.Delivered" icon="success" title="支付完成">
+          <el-result v-if="activeOrder.status === OrderStatus.Delivered" icon="success" :title="$t('products_page.payment_completed')">
             <template #sub-title>
               <div class="mt-2 text-base">
-                注册码：
+                {{ $t('products_page.reg_code') }}:
                 <span class="font-mono font-semibold">{{ activeOrder.reg_code }}</span>
               </div>
             </template>
             <template #extra>
-              <el-button v-if="activeOrder.reg_code" type="primary" @click="copy(activeOrder.reg_code)">复制注册码</el-button>
+              <el-button v-if="activeOrder.reg_code" type="primary" @click="copy(activeOrder.reg_code)">{{ $t('order_query.copy_reg_code') }}</el-button>
             </template>
           </el-result>
         </div>

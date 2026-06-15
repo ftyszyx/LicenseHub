@@ -30,6 +30,16 @@ export interface LicensePlan {
   updated_at: string
 }
 
+export type PublicPlansState = 'available' | 'app_disabled' | 'app_not_found'
+
+export interface PublicPlansInfo {
+  state: PublicPlansState
+  app_id?: number | null
+  app_name?: string | null
+  app_status?: number | null
+  plans: LicensePlan[]
+}
+
 export type ListPlansParams = {
   id?: number
   app_id?: number

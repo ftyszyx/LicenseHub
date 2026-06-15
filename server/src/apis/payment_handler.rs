@@ -30,6 +30,7 @@ const DEFAULT_WECHAT_API_BASE_URL: &str = "https://api.mch.weixin.qq.com";
 const DEFAULT_ALIPAY_GATEWAY_URL: &str = "https://openapi.alipay.com/gateway.do";
 const ORDER_EVENT_PAYMENT_DELIVERED: &str = "payment.delivered";
 const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
+const APP_STATUS_ENABLED: i16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i16)]
@@ -166,6 +167,23 @@ pub struct ListPlansParams {
 #[derive(Debug, Deserialize, Default)]
 pub struct PublicPlansParams {
     pub app_id: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicPlansState {
+    Available,
+    AppDisabled,
+    AppNotFound,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PublicPlansInfo {
+    pub state: PublicPlansState,
+    pub app_id: Option<i32>,
+    pub app_name: Option<String>,
+    pub app_status: Option<i16>,
+    pub plans: Vec<PlanInfo>,
 }
 
 #[derive(Debug, Serialize)]
@@ -407,21 +425,50 @@ pub struct PayMethodsInfo {
 pub async fn list_public_plans(
     depot: &mut Depot,
     req: &mut Request,
-) -> Result<ApiResponse<Vec<PlanInfo>>, AppError> {
+) -> Result<ApiResponse<PublicPlansInfo>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let params = req.parse_queries::<PublicPlansParams>().unwrap_or_default();
+    let app = match params.app_id {
+        Some(app_id) => match apps::Entity::find_by_id(app_id).one(&state.db).await? {
+            Some(app) if app.status != APP_STATUS_ENABLED => {
+                return Ok(ApiResponse::success(PublicPlansInfo {
+                    state: PublicPlansState::AppDisabled,
+                    app_id: Some(app.id),
+                    app_name: Some(app.name),
+                    app_status: Some(app.status),
+                    plans: Vec::new(),
+                }));
+            }
+            Some(app) => Some(app),
+            None => {
+                return Ok(ApiResponse::success(PublicPlansInfo {
+                    state: PublicPlansState::AppNotFound,
+                    app_id: Some(app_id),
+                    app_name: None,
+                    app_status: None,
+                    plans: Vec::new(),
+                }));
+            }
+        },
+        None => None,
+    };
     let mut query = license_plans::Entity::find()
         .find_also_related(apps::Entity)
         .filter(license_plans::Column::Status.eq(i16::from(PlanStatus::Enabled)))
+        .filter(apps::Column::Status.eq(APP_STATUS_ENABLED))
         .order_by_asc(license_plans::Column::SortOrder)
         .order_by_asc(license_plans::Column::Id);
     if let Some(app_id) = params.app_id {
         query = query.filter(license_plans::Column::AppId.eq(app_id));
     }
     let rows = query.all(&state.db).await?;
-    Ok(ApiResponse::success(
-        rows.into_iter().map(PlanInfo::from).collect(),
-    ))
+    Ok(ApiResponse::success(PublicPlansInfo {
+        state: PublicPlansState::Available,
+        app_id: app.as_ref().map(|app| app.id),
+        app_name: app.as_ref().map(|app| app.name.clone()),
+        app_status: app.as_ref().map(|app| app.status),
+        plans: rows.into_iter().map(PlanInfo::from).collect(),
+    }))
 }
 
 #[handler]
@@ -821,7 +868,8 @@ pub async fn create_order_impl(
         .map(Ok)
         .unwrap_or_else(|| provider_for_pay_type(&pay_type))?
         .to_string();
-    let plan = license_plans::Entity::find_by_id(req.plan_id)
+    let (plan, app) = license_plans::Entity::find_by_id(req.plan_id)
+        .find_also_related(apps::Entity)
         .one(&state.db)
         .await?
         .ok_or_else(|| AppError::not_found("license_plans", Some(req.plan_id)))?;
@@ -830,6 +878,10 @@ pub async fn create_order_impl(
             "PLAN_DISABLED",
             "plan is disabled",
         ));
+    }
+    let app = app.ok_or_else(|| AppError::not_found("apps", Some(plan.app_id)))?;
+    if app.status != APP_STATUS_ENABLED {
+        return Err(AppError::business_logic("APP_DISABLED", "app is disabled"));
     }
     if plan.price_cents <= 0 {
         return Err(AppError::business_logic(

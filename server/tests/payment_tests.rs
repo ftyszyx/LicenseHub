@@ -135,7 +135,93 @@ async fn test_public_products_list() {
     assert_eq!(resp.status_code, Some(StatusCode::OK));
     let json = helpers::print_response_body_get_json(resp, "public_products").await;
     assert!(json["success"].as_bool().unwrap());
-    assert!(json["data"].is_array());
+    assert_eq!(json["data"]["state"].as_str().unwrap(), "available");
+    assert!(json["data"]["plans"].is_array());
+}
+
+#[tokio::test]
+async fn test_public_products_hide_disabled_app_and_reject_order() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let create_app_body = json!({
+        "name": helpers::unique_name("DisabledPayApp"),
+        "app_id": helpers::unique_name("com.disabled.pay.app"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": helpers::unique_name("PAYKEY"),
+        "trial_days": 0,
+        "sort_order": 0,
+        "status": 0
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_disabled_pay_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let plan_body = json!({
+        "app_id": app_id,
+        "name": "disabled app license",
+        "description": "test disabled app plan",
+        "price_cents": 123,
+        "code_type": 0,
+        "valid_days": 30,
+        "total_count": null,
+        "status": 1,
+        "sort_order": 0
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/plans"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&plan_body)
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_disabled_app_plan").await;
+    let plan_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/products?app_id={}",
+        app_id
+    )))
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "disabled_app_public_products").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["state"].as_str().unwrap(), "app_disabled");
+    assert_eq!(json["data"]["app_id"].as_i64().unwrap(), app_id as i64);
+    assert_eq!(json["data"]["plans"].as_array().unwrap().len(), 0);
+
+    let resp = TestClient::get(helpers::get_url("/api/products"))
+        .send(&ctx.app)
+        .await;
+    let json =
+        helpers::print_response_body_get_json(resp, "all_public_products_without_disabled_app")
+            .await;
+    assert!(json["success"].as_bool().unwrap());
+    assert!(
+        json["data"]["plans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["id"].as_i64() != Some(plan_id as i64))
+    );
+
+    let resp = TestClient::post(helpers::get_url("/api/orders"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"plan_id": plan_id, "pay_type": "wechat_native"}))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_disabled_app_order").await;
+    assert!(!json["success"].as_bool().unwrap());
+    assert!(json["message"].as_str().unwrap().contains("APP_DISABLED"));
 }
 
 #[tokio::test]

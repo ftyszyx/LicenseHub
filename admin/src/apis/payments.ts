@@ -9,12 +9,22 @@ import type {
   OrderModel,
   PaymentChannel,
   PayMethodsInfo,
+  PublicPlansInfo,
   SavePaymentChannelReq,
   SavePlanReq,
 } from '@/types/payments'
 
 export const fetchPublicPlans = async (params: { app_id?: number } = {}) => {
-  const response = await request.get('/products', { params }) as ApiResponse<LicensePlan[]>
+  const response = await request.get('/products', { params }) as ApiResponse<LicensePlan[] | PublicPlansInfo>
+  if (Array.isArray(response.data)) {
+    return {
+      state: 'available',
+      app_id: params.app_id ?? null,
+      app_name: null,
+      app_status: null,
+      plans: response.data,
+    } satisfies PublicPlansInfo
+  }
   return response.data
 }
 
