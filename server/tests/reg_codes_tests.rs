@@ -1,5 +1,8 @@
 use crate::helpers::print_response_body_get_json;
 use app_server::core::constants;
+use app_server::utils::license_signing::LicensePayload;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use salvo::prelude::*;
 use salvo::test::TestClient;
 use serde_json::json;
@@ -202,6 +205,7 @@ async fn test_count_bind_check_usecount_and_use_records() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;
     ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
 
     let app_key = helpers::unique_name("COUNTAPIKEY");
     let create_app_body = json!({
@@ -300,6 +304,192 @@ async fn test_count_bind_check_usecount_and_use_records() {
     let json = print_response_body_get_json(resp, "admin_use_records").await;
     assert!(json["success"].as_bool().unwrap());
     assert_eq!(json["data"]["total"].as_i64().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn test_time_bind_and_check_return_signed_license() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
+
+    let app_key = helpers::unique_name("SIGNEDTIMEKEY");
+    let app_identifier = helpers::unique_name("com.signed.time");
+    let create_app_body = json!({
+        "name": helpers::unique_name("SignedTimeApp"),
+        "app_id": app_identifier,
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": app_key,
+        "trial_days": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_signed_time_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let code = helpers::unique_name("SIGNEDTIMECODE");
+    let create_rc = json!({
+        "code": code,
+        "app_id": app_id,
+        "valid_days": 7,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 0
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_rc)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_signed_time_reg_code").await;
+    assert!(json["success"].as_bool().unwrap());
+
+    let device_id = helpers::unique_name("signed-time-dev");
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let bind_json = print_response_body_get_json(resp, "bind_signed_time_code").await;
+    assert_signed_time_license(&bind_json, &device_id, &app_identifier);
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/check"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let check_json = print_response_body_get_json(resp, "check_signed_time_device").await;
+    assert_signed_time_license(&check_json, &device_id, &app_identifier);
+}
+
+#[tokio::test]
+async fn test_time_bind_requires_configured_license_signing_key() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let app_key = helpers::unique_name("NOSIGNKEY");
+    let create_app_body = json!({
+        "name": helpers::unique_name("NoSignKeyApp"),
+        "app_id": helpers::unique_name("com.no.sign.key"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": app_key,
+        "trial_days": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_no_sign_key_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let code = helpers::unique_name("NOSIGNKEYCODE");
+    let create_rc = json!({
+        "code": code,
+        "app_id": app_id,
+        "valid_days": 7,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 0
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_rc)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_no_sign_key_reg_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": "device-no-key"}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "bind_without_license_signing_key").await;
+    assert!(!json["success"].as_bool().unwrap());
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("license signing key is not configured")
+    );
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{}",
+        reg_code_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json =
+        print_response_body_get_json(resp, "get_no_sign_key_reg_code_after_failed_bind").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["status"].as_i64(), Some(0));
+    assert!(json["data"]["device_id"].is_null());
+    assert!(json["data"]["device_id_str"].is_null());
+}
+
+fn assert_signed_time_license(json: &serde_json::Value, device_id: &str, app_id: &str) {
+    assert!(json["success"].as_bool().unwrap());
+    let data = &json["data"];
+    let license = &data["license"];
+    assert!(license.is_object(), "signed license is missing: {json:?}");
+    assert_eq!(license["algorithm"].as_str(), Some("Ed25519"));
+    assert_eq!(license["key_id"].as_str(), Some("license-v1"));
+    assert!(
+        license["signature"].as_str().unwrap_or_default().len() > 32,
+        "signature should be base64url text"
+    );
+    let payload = &license["payload"];
+    assert_eq!(payload["version"].as_i64(), Some(1));
+    assert_eq!(payload["app_id"].as_str(), Some(app_id));
+    assert_eq!(payload["device_id"].as_str(), Some(device_id));
+    assert_eq!(payload["license_type"].as_str(), Some("time"));
+    assert_eq!(payload["expire_time"], data["expire_time"]);
+    assert!(payload["app_key_hash"].as_str().unwrap_or_default().len() >= 64);
+    assert!(payload["issued_at"].as_i64().unwrap_or_default() > 0);
+    assert_license_signature_is_valid(license);
+}
+
+fn assert_license_signature_is_valid(license: &serde_json::Value) {
+    let public_key_bytes = URL_SAFE_NO_PAD
+        .decode("I7xUkSwebpLEqGglyGfif_3FVb_71CRPF6Jqv__ull0")
+        .expect("test public key");
+    let public_key_bytes: [u8; 32] = public_key_bytes.try_into().expect("public key bytes");
+    let verifying_key = VerifyingKey::from_bytes(&public_key_bytes).expect("verifying key");
+    let signature_bytes = URL_SAFE_NO_PAD
+        .decode(license["signature"].as_str().expect("signature"))
+        .expect("signature bytes");
+    let signature_bytes: [u8; 64] = signature_bytes.try_into().expect("ed25519 signature bytes");
+    let signature = Signature::from_bytes(&signature_bytes);
+    let payload: LicensePayload =
+        serde_json::from_value(license["payload"].clone()).expect("license payload");
+    let payload_bytes = serde_json::to_vec(&payload).expect("payload json");
+
+    verifying_key
+        .verify(&payload_bytes, &signature)
+        .expect("signed license should verify");
 }
 
 #[tokio::test]

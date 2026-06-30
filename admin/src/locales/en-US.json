@@ -440,6 +440,22 @@
     "title": "System Settings",
     "storefront_title": "Storefront title",
     "storefront_title_placeholder": "Enter storefront title",
-    "storefront_title_help": "Shown as the brand title in the storefront header."
+    "storefront_title_help": "Shown as the brand title in the storefront header.",
+    "license_signing_title": "License signing",
+    "license_signing_help": "Generate the server-side signing key and copy the public key into the desktop app release config.",
+    "license_key_configured": "Configured",
+    "license_key_missing": "Not configured",
+    "license_key_id": "Key ID",
+    "license_public_key": "Public key",
+    "license_public_key_placeholder": "Generate a key to show the public key",
+    "license_public_key_help": "Set this value as WEIBOVAULT_LICENSE_PUBLIC_KEY_B64 when building WeiboVault.",
+    "license_private_key": "Private key",
+    "license_private_key_placeholder": "Generate a key to show the private key",
+    "license_private_key_help": "Store this key securely. Anyone with this value can sign licenses.",
+    "license_updated_at": "Updated at",
+    "generate_license_key": "Generate Key",
+    "rotate_license_key": "Rotate Key",
+    "rotate_license_key_confirm": "Rotating the signing key will break license verification for clients built with the old public key. Continue?",
+    "license_key_generated": "License signing key updated"
   }
 }

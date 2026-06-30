@@ -47,6 +47,10 @@ sea-orm = { version = "1.1.13", features = [
 ] }
 
 bytes = "1"
+base64 = "0.22"
+ed25519-dalek = "2"
+sha2 = "0.10"
+getrandom = "0.3"
 
 #其它
 bcrypt = "0.17.0"

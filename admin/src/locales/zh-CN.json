@@ -447,6 +447,22 @@
     "title": "系统设置",
     "storefront_title": "商城首页标题",
     "storefront_title_placeholder": "请输入商城首页标题",
-    "storefront_title_help": "显示在商城首页左上角的品牌标题。"
+    "storefront_title_help": "显示在商城首页左上角的品牌标题。",
+    "license_signing_title": "授权签名",
+    "license_signing_help": "生成服务端授权签名密钥，并将公钥复制到桌面端发布配置中。",
+    "license_key_configured": "已配置",
+    "license_key_missing": "未配置",
+    "license_key_id": "密钥 ID",
+    "license_public_key": "公钥",
+    "license_public_key_placeholder": "生成密钥后显示公钥",
+    "license_public_key_help": "构建 WeiboVault 时，将此值设置为 WEIBOVAULT_LICENSE_PUBLIC_KEY_B64。",
+    "license_private_key": "私钥",
+    "license_private_key_placeholder": "生成密钥后显示私钥",
+    "license_private_key_help": "请安全保存此私钥，持有该值的人可以签发授权。",
+    "license_updated_at": "更新时间",
+    "generate_license_key": "生成密钥",
+    "rotate_license_key": "轮换密钥",
+    "rotate_license_key_confirm": "轮换签名密钥会导致使用旧公钥构建的客户端无法通过授权校验。确认继续？",
+    "license_key_generated": "授权签名密钥已更新"
   }
 }

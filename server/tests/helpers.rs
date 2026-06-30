@@ -75,6 +75,23 @@ pub async fn db_lock() -> MutexGuard<'static, ()> {
     DB_MUTEX.lock().await
 }
 
+#[allow(dead_code)]
+pub async fn seed_test_license_signing_key(ctx: &TestContext) {
+    let pool = sqlx::PgPool::connect(&ctx.app_state.config.database.db_url)
+        .await
+        .expect("connect test database");
+    sqlx::query(
+        r#"
+        insert into system_settings (key, value, created_at, updated_at)
+        values ('license_signing_private_key_b64', $1, now(), now())
+        on conflict (key) do update set value = excluded.value, updated_at = now()
+        "#,
+    )
+    .bind("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
+    .execute(&pool)
+    .await
+    .expect("seed test license signing key");
+}
 pub async fn print_response_body_get_json(
     mut response: Response,
     label: &str,

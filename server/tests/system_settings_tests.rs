@@ -48,3 +48,60 @@ async fn test_system_settings_storefront_title() {
         "慧达电脑科技"
     );
 }
+
+#[tokio::test]
+async fn test_generate_license_signing_key_returns_admin_keys_only() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let resp = TestClient::get(helpers::get_url("/api/admin/system-settings"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    let json = helpers::print_response_body_get_json(resp, "system_settings_before_key").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["license_signing"]["configured"], false);
+    assert!(json["data"]["license_signing"]["public_key_b64"].is_null());
+    assert!(json["data"]["license_signing"]["private_key_b64"].is_null());
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/system-settings/license-key"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"rotate": false}))
+        .send(&ctx.app)
+        .await;
+    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    let json = helpers::print_response_body_get_json(resp, "generate_license_key").await;
+    assert!(json["success"].as_bool().unwrap());
+
+    let license = &json["data"]["license_signing"];
+    assert_eq!(license["configured"], true);
+    assert_eq!(license["key_id"].as_str(), Some("license-v1"));
+    assert_eq!(
+        license["public_key_b64"].as_str().unwrap_or_default().len(),
+        43
+    );
+    assert_eq!(
+        license["private_key_b64"]
+            .as_str()
+            .unwrap_or_default()
+            .len(),
+        43
+    );
+    assert!(license["updated_at"].as_str().is_some());
+
+    let resp = TestClient::get(helpers::get_url("/api/site-settings"))
+        .send(&ctx.app)
+        .await;
+    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    let json = helpers::print_response_body_get_json(resp, "public_site_settings_after_key").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert!(
+        json["data"]["license_signing"]["public_key_b64"]
+            .as_str()
+            .is_some()
+    );
+    assert!(json["data"]["license_signing"]["private_key_b64"].is_null());
+}

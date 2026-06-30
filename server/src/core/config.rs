@@ -8,6 +8,7 @@ pub struct Config {
     pub jwt: JwtConfig,
     pub server: ServerConfig,
     pub payment: PaymentConfig,
+    pub license_signing: LicenseSigningConfig,
     pub register_open: bool,
 }
 
@@ -53,6 +54,11 @@ pub struct PaymentConfig {
     pub site_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct LicenseSigningConfig {
+    pub key_id: String,
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, AppError> {
         Ok(Config {
@@ -61,6 +67,7 @@ impl Config {
             jwt: JwtConfig::from_env()?,
             server: ServerConfig::from_env()?,
             payment: PaymentConfig::from_env()?,
+            license_signing: LicenseSigningConfig::from_env()?,
             register_open: env::var("REGISTER_OPEN")
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
@@ -172,6 +179,14 @@ impl PaymentConfig {
                 .trim_end_matches('/')
                 .to_string(),
             site_name: env::var("PAYMENT_SITE_NAME").unwrap_or_else(|_| "LicenseHub".to_string()),
+        })
+    }
+}
+
+impl LicenseSigningConfig {
+    fn from_env() -> Result<Self, AppError> {
+        Ok(Self {
+            key_id: env::var("LICENSE_SIGNING_KEY_ID").unwrap_or_else(|_| "license-v1".to_string()),
         })
     }
 }

@@ -214,6 +214,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("system_settings", "UPDATE"))
                 .put(apis::system_settings_handler::update_system_settings),
         )
+        .push(
+            Router::with_path("system-settings/license-key")
+                .hoop(RequirePerm::new("system_settings", "UPDATE"))
+                .post(apis::system_settings_handler::generate_license_signing_key),
+        )
         //reg_codes
         .push(
             Router::with_path("reg_codes")

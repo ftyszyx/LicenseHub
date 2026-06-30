@@ -1,8 +1,12 @@
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
+use crate::apis::system_settings_handler::get_license_signing_private_key_b64;
 use crate::apis::use_record_handler::create_use_record;
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
+use crate::utils::license_signing::{
+    LicensePayload, SignedLicense, app_key_hash, public_key_b64_from_private_key, sign_license,
+};
 use chrono::{DateTime, FixedOffset, Utc};
 use data_model::{app_devices, apps, reg_codes};
 use salvo::{oapi::extract::JsonBody, prelude::*};
@@ -123,6 +127,7 @@ pub struct RegCodeStatusResp {
     pub expire_time: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remain_count: Option<i32>,
+    pub license: SignedLicense,
 }
 
 #[derive(Serialize, Deserialize, Debug, Validate)]
@@ -684,18 +689,82 @@ async fn find_reg_code_by_app_and_code(
         .ok_or(AppError::not_found("reg_code".to_string(), None))
 }
 
-fn time_status_resp(expire_time: DateTime<FixedOffset>) -> RegCodeStatusResp {
-    RegCodeStatusResp {
-        expire_time: Some(expire_time.timestamp()),
+fn time_status_resp(
+    state: &AppState,
+    private_key_b64: &str,
+    app_model: &apps::Model,
+    device_id: &str,
+    expire_time: DateTime<FixedOffset>,
+) -> Result<RegCodeStatusResp, AppError> {
+    let expire_time_seconds = expire_time.timestamp();
+    Ok(RegCodeStatusResp {
+        expire_time: Some(expire_time_seconds),
         remain_count: None,
-    }
+        license: status_license(
+            state,
+            private_key_b64,
+            app_model,
+            device_id,
+            "time",
+            Some(expire_time_seconds),
+            None,
+        )?,
+    })
 }
 
-fn count_status_resp(remain_count: i32) -> RegCodeStatusResp {
-    RegCodeStatusResp {
+fn count_status_resp(
+    state: &AppState,
+    private_key_b64: &str,
+    app_model: &apps::Model,
+    device_id: &str,
+    remain_count: i32,
+) -> Result<RegCodeStatusResp, AppError> {
+    Ok(RegCodeStatusResp {
         expire_time: None,
         remain_count: Some(remain_count),
-    }
+        license: status_license(
+            state,
+            private_key_b64,
+            app_model,
+            device_id,
+            "count",
+            None,
+            Some(remain_count),
+        )?,
+    })
+}
+
+fn status_license(
+    state: &AppState,
+    private_key_b64: &str,
+    app_model: &apps::Model,
+    device_id: &str,
+    license_type: &str,
+    expire_time: Option<i64>,
+    remain_count: Option<i32>,
+) -> Result<SignedLicense, AppError> {
+    sign_license(
+        &state.config.license_signing,
+        private_key_b64,
+        LicensePayload {
+            version: 1,
+            app_id: app_model.app_id.clone(),
+            app_key_hash: app_key_hash(&app_model.app_valid_key),
+            device_id: device_id.to_string(),
+            license_type: license_type.to_string(),
+            expire_time,
+            remain_count,
+            issued_at: Utc::now().timestamp(),
+        },
+    )
+}
+
+async fn require_license_signing_private_key_b64(state: &AppState) -> Result<String, AppError> {
+    let private_key_b64 = get_license_signing_private_key_b64(state)
+        .await?
+        .ok_or_else(|| AppError::Message("license signing key is not configured".to_string()))?;
+    public_key_b64_from_private_key(&private_key_b64)?;
+    Ok(private_key_b64)
 }
 
 fn ensure_reg_code_bound_to_current_device(
@@ -718,11 +787,13 @@ pub async fn bind_code_impl(
     let app_model = find_app_by_key(state, &req.app_key).await?;
     let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
     let reg_code_model = find_reg_code_by_app_and_code(state, app_model.id, &req.reg_code).await?;
+    let private_key_b64 = require_license_signing_private_key_b64(state).await?;
 
     match CodeType::from(app_model.code_type) {
         CodeType::Time => {
             bind_time_reg_code(
                 state,
+                &private_key_b64,
                 &app_model,
                 &req.device_id,
                 device_model,
@@ -733,6 +804,7 @@ pub async fn bind_code_impl(
         CodeType::Count => {
             bind_count_reg_code(
                 state,
+                &private_key_b64,
                 &app_model,
                 &req.device_id,
                 device_model,
@@ -749,6 +821,7 @@ pub async fn check_device_impl(
 ) -> Result<RegCodeStatusResp, AppError> {
     let app_model = find_app_by_key(state, &req.app_key).await?;
     let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
+    let private_key_b64 = require_license_signing_private_key_b64(state).await?;
     let now = Utc::now().fixed_offset();
 
     match CodeType::from(app_model.code_type) {
@@ -774,7 +847,13 @@ pub async fn check_device_impl(
             if expire_time <= now {
                 return Err(AppError::Message("device expired".into()));
             }
-            Ok(time_status_resp(expire_time))
+            time_status_resp(
+                state,
+                &private_key_b64,
+                &app_model,
+                &req.device_id,
+                expire_time,
+            )
         }
         CodeType::Count => {
             let device_model = match device_model {
@@ -797,7 +876,13 @@ pub async fn check_device_impl(
             if remain_count <= 0 {
                 return Err(AppError::Message("device remaining count is 0".into()));
             }
-            Ok(count_status_resp(remain_count))
+            count_status_resp(
+                state,
+                &private_key_b64,
+                &app_model,
+                &req.device_id,
+                remain_count,
+            )
         }
     }
 }
@@ -873,6 +958,7 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
 
 pub async fn bind_time_reg_code(
     state: &AppState,
+    private_key_b64: &str,
     app_model: &apps::Model,
     device_id: &str,
     device_model: Option<app_devices::Model>,
@@ -891,7 +977,7 @@ pub async fn bind_time_reg_code(
         if expire_time <= now {
             return Err(AppError::Message("device expired".into()));
         }
-        return Ok(time_status_resp(expire_time));
+        return time_status_resp(state, private_key_b64, app_model, device_id, expire_time);
     }
 
     let tx = state.db.begin().await?;
@@ -932,11 +1018,12 @@ pub async fn bind_time_reg_code(
 
     active_reg_model.update(&tx).await?;
     tx.commit().await?;
-    Ok(time_status_resp(expire_time))
+    time_status_resp(state, private_key_b64, app_model, device_id, expire_time)
 }
 
 pub async fn bind_count_reg_code(
     state: &AppState,
+    private_key_b64: &str,
     app_model: &apps::Model,
     device_id: &str,
     device_model: Option<app_devices::Model>,
@@ -954,7 +1041,7 @@ pub async fn bind_count_reg_code(
         if remain_count <= 0 {
             return Err(AppError::Message("device remaining count is 0".into()));
         }
-        return Ok(count_status_resp(remain_count));
+        return count_status_resp(state, private_key_b64, app_model, device_id, remain_count);
     }
 
     let total_count = reg_code_model.total_count.unwrap_or(0);
@@ -994,7 +1081,7 @@ pub async fn bind_count_reg_code(
 
     active_reg_model.update(&tx).await?;
     tx.commit().await?;
-    Ok(count_status_resp(remain_count))
+    count_status_resp(state, private_key_b64, app_model, device_id, remain_count)
 }
 
 pub async fn validate_code_impl(
