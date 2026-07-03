@@ -374,6 +374,221 @@ async fn test_time_bind_and_check_return_signed_license() {
 }
 
 #[tokio::test]
+async fn test_revoke_time_reg_code_refunds_device_and_permanently_invalidates_code() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
+
+    let app_key = helpers::unique_name("REVOKETIMEKEY");
+    let create_app_body = json!({
+        "name": helpers::unique_name("RevokeTimeApp"),
+        "app_id": helpers::unique_name("com.revoke.time"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": app_key,
+        "trial_days": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_revoke_time_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let code = helpers::unique_name("REVOKETIMECODE");
+    let create_rc = json!({
+        "code": code,
+        "app_id": app_id,
+        "valid_days": 7,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 0
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_rc)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_revoke_time_reg_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let device_id = helpers::unique_name("revoke-time-dev");
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let bind_json = print_response_body_get_json(resp, "bind_revoke_time_code").await;
+    assert!(bind_json["success"].as_bool().unwrap());
+    let expire_before_revoke = bind_json["data"]["expire_time"].as_i64().unwrap();
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{}/revoke",
+        reg_code_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let revoke_json = print_response_body_get_json(resp, "revoke_time_reg_code").await;
+    assert!(revoke_json["success"].as_bool().unwrap());
+    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(3));
+    assert!(revoke_json["data"]["device_id"].is_null());
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/check"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let check_json = print_response_body_get_json(resp, "check_revoke_time_device").await;
+    assert!(!check_json["success"].as_bool().unwrap());
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": helpers::unique_name("rebind-time-dev")}))
+        .send(&ctx.app)
+        .await;
+    let rebind_json = print_response_body_get_json(resp, "rebind_refunded_time_code").await;
+    assert!(!rebind_json["success"].as_bool().unwrap());
+
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    let device_expire: Option<chrono::DateTime<chrono::FixedOffset>> = sqlx::query_scalar(
+        "select expire_time from app_devices where app_id = $1 and device_id = $2",
+    )
+    .bind(app_id)
+    .bind(&device_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(device_expire.unwrap().timestamp() < expire_before_revoke);
+}
+
+#[tokio::test]
+async fn test_revoke_count_reg_code_restores_remaining_and_permanently_invalidates_code() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
+
+    let app_key = helpers::unique_name("REVOKECOUNTKEY");
+    let create_app_body = json!({
+        "name": helpers::unique_name("RevokeCountApp"),
+        "app_id": helpers::unique_name("com.revoke.count"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": app_key,
+        "code_type": 1,
+        "trial_num": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_revoke_count_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let code = helpers::unique_name("REVOKECOUNTCODE");
+    let create_rc = json!({
+        "code": code,
+        "app_id": app_id,
+        "valid_days": 0,
+        "max_devices": 1,
+        "status": 0,
+        "code_type": 1,
+        "total_count": 5
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_rc)
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_revoke_count_reg_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let device_id = helpers::unique_name("revoke-count-dev");
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let bind_json = print_response_body_get_json(resp, "bind_revoke_count_code").await;
+    assert!(bind_json["success"].as_bool().unwrap());
+    assert_eq!(bind_json["data"]["remain_count"].as_i64(), Some(5));
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/usecount"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "app_key": app_key,
+            "device_id": device_id,
+            "use_count": 2,
+            "use_info": {"case": "refund-before-exhaust"}
+        }))
+        .send(&ctx.app)
+        .await;
+    let use_json = print_response_body_get_json(resp, "use_revoke_count_code").await;
+    assert!(use_json["success"].as_bool().unwrap());
+    assert_eq!(use_json["data"]["remain_count"].as_i64(), Some(3));
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{}/revoke",
+        reg_code_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let revoke_json = print_response_body_get_json(resp, "revoke_count_reg_code").await;
+    assert!(revoke_json["success"].as_bool().unwrap());
+    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(3));
+    assert!(revoke_json["data"]["device_id"].is_null());
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/check"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "device_id": device_id}))
+        .send(&ctx.app)
+        .await;
+    let check_json = print_response_body_get_json(resp, "check_revoke_count_device").await;
+    assert!(!check_json["success"].as_bool().unwrap());
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": helpers::unique_name("rebind-count-dev")}))
+        .send(&ctx.app)
+        .await;
+    let rebind_json = print_response_body_get_json(resp, "rebind_refunded_count_code").await;
+    assert!(!rebind_json["success"].as_bool().unwrap());
+
+    let resp = TestClient::put(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{}",
+        reg_code_id
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({"status": 1}))
+    .send(&ctx.app)
+    .await;
+    let update_json = print_response_body_get_json(resp, "update_refunded_count_code").await;
+    assert!(!update_json["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
 async fn test_time_bind_requires_configured_license_signing_key() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;

@@ -14,7 +14,7 @@ use salvo_oapi::extract::PathParam;
 use salvo_oapi::{ToSchema, endpoint};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, Set, TransactionTrait,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -56,6 +56,7 @@ pub enum RegCodeStatus {
     Unused = 0,
     Issued = 1,
     Binded = 2,
+    Refunded = 3,
 }
 
 impl Default for RegCodeStatus {
@@ -70,6 +71,7 @@ impl From<i16> for RegCodeStatus {
             0 => RegCodeStatus::Unused,
             1 => RegCodeStatus::Issued,
             2 => RegCodeStatus::Binded,
+            3 => RegCodeStatus::Refunded,
             _ => RegCodeStatus::Unused,
         }
     }
@@ -329,6 +331,12 @@ pub async fn update_impl(
     let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
     let reg_code =
         reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+    if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Refunded {
+        return Err(AppError::business_logic(
+            "REG_CODE_REFUNDED_LOCKED",
+            "refunded reg code cannot be changed",
+        ));
+    }
     let final_app_id = req.app_id.unwrap_or(reg_code.app_id);
     let final_code_type = req
         .code_type
@@ -354,6 +362,12 @@ pub async fn update_impl(
         reg_code.max_devices = Set(v);
     }
     if let Some(v) = req.status {
+        let status = RegCodeStatus::from(v);
+        if status == RegCodeStatus::Binded || status == RegCodeStatus::Refunded {
+            return Err(AppError::validation(
+                "cannot set reg_code status to binded or refunded directly",
+            ));
+        }
         reg_code.status = Set(v);
     }
     reg_code.code_type = Set(i16::from(code_type));
@@ -442,6 +456,11 @@ pub async fn update_status_impl(
     if req.status == RegCodeStatus::Binded {
         return Err(AppError::validation("cannot set reg_code status to binded"));
     }
+    if req.status == RegCodeStatus::Refunded {
+        return Err(AppError::validation(
+            "cannot set reg_code status to refunded directly",
+        ));
+    }
 
     let mut active: reg_codes::ActiveModel = reg_code.into_active_model();
     active.status = Set(i16::from(req.status));
@@ -461,6 +480,82 @@ pub async fn update_status_impl(
             Some(updated_reg_code.id),
         )),
     }
+}
+
+#[handler]
+pub async fn revoke(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+) -> Result<ApiResponse<RegCodeInfo>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let reg_code = revoke_impl(&state, id.into_inner()).await?;
+    Ok(ApiResponse::success(reg_code))
+}
+
+pub async fn revoke_impl(state: &AppState, id: i32) -> Result<RegCodeInfo, AppError> {
+    let tx = state.db.begin().await?;
+    let reg_code = reg_codes::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+
+    match RegCodeStatus::from(reg_code.status) {
+        RegCodeStatus::Binded => {}
+        RegCodeStatus::Refunded => {
+            return Err(AppError::business_logic(
+                "REG_CODE_ALREADY_REFUNDED",
+                "reg code is already refunded",
+            ));
+        }
+        _ => {
+            return Err(AppError::business_logic(
+                "REG_CODE_REVOKE_FORBIDDEN",
+                "only binded reg codes can be refunded",
+            ));
+        }
+    }
+
+    let device_id = reg_code.device_id.ok_or_else(|| {
+        AppError::business_logic(
+            "REG_CODE_DEVICE_NOT_FOUND",
+            "reg code is not bound to a device",
+        )
+    })?;
+    let device = app_devices::Entity::find_by_id(device_id)
+        .lock_exclusive()
+        .one(&tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("app_devices".to_string(), Some(device_id)))?;
+
+    let now = Utc::now().fixed_offset();
+    let current_expire_time = device.expire_time;
+    let current_remaining = device.remaining;
+    let mut active_device = device.into_active_model();
+    match CodeType::from(reg_code.code_type) {
+        CodeType::Time => {
+            let expire_time = current_expire_time.unwrap_or(now);
+            let revoked_expire_time =
+                expire_time - chrono::Duration::days(reg_code.valid_days as i64);
+            active_device.expire_time = Set(Some(revoked_expire_time));
+        }
+        CodeType::Count => {
+            let revoked_remaining =
+                (current_remaining.unwrap_or(0) - reg_code.total_count.unwrap_or(0)).max(0);
+            active_device.remaining = Set(Some(revoked_remaining));
+        }
+    }
+    active_device.updated_at = Set(now);
+    active_device.update(&tx).await?;
+
+    let mut active_reg_code = reg_code.into_active_model();
+    active_reg_code.status = Set(i16::from(RegCodeStatus::Refunded));
+    active_reg_code.device_id = Set(None);
+    active_reg_code.updated_at = Set(now);
+    let updated_reg_code = active_reg_code.update(&tx).await?;
+    tx.commit().await?;
+
+    get_by_id_impl(state, updated_reg_code.id).await
 }
 
 // Delete RegCode
@@ -787,6 +882,12 @@ pub async fn bind_code_impl(
     let app_model = find_app_by_key(state, &req.app_key).await?;
     let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
     let reg_code_model = find_reg_code_by_app_and_code(state, app_model.id, &req.reg_code).await?;
+    if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Refunded {
+        return Err(AppError::business_logic(
+            "REG_CODE_REFUNDED",
+            "reg code has been refunded",
+        ));
+    }
     let private_key_b64 = require_license_signing_private_key_b64(state).await?;
 
     match CodeType::from(app_model.code_type) {
@@ -1122,6 +1223,12 @@ pub async fn validate_code_impl(
         .one(&state.db)
         .await?
         .ok_or(AppError::not_found("reg_code".to_string(), None))?;
+    if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Refunded {
+        return Err(AppError::business_logic(
+            "REG_CODE_REFUNDED",
+            "reg code has been refunded",
+        ));
+    }
     match app_model.code_type.into() {
         CodeType::Time => {
             time_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await

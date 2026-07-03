@@ -384,8 +384,12 @@
     "status_unused": "未使用",
     "status_issued": "已发放",
     "status_binded": "已绑定",
+    "status_refunded": "已退款",
     "mark_issued": "标记已发放",
     "mark_issued_confirm": "确认将此注册码标记为已发放吗？",
+    "revoke": "退款",
+    "revoke_confirm": "确认退款此注册码并扣回设备授权吗？此操作不可撤销。",
+    "revoked": "注册码已退款",
     "status_locked": "已绑定的注册码不允许修改状态",
     "delete_locked": "仅未使用的注册码允许删除",
     "device_id": "设备ID"

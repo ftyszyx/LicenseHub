@@ -27,6 +27,11 @@ export const updateRegCodeStatus = async (id: number, status: RegCodeStatus) => 
   return response.data
 }
 
+export const revokeRegCode = async (id: number) => {
+  const response = await request.post(`/admin/reg_codes/${id}/revoke`) as ApiResponse<RegCodeModel>
+  return response.data
+}
+
 export const batchCreateRegCodes = async (payload: BatchCreateRegCodesReq) => {
   // call create single repeatedly on server? For now assume server has add endpoint; we'll loop client-side as a simple approach.
   const items: RegCodeModel[] = []

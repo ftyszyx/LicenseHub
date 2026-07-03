@@ -62,10 +62,11 @@
         <el-table-column :label="$t('reg_codes.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="180" fixed="right" align="right">
+        <el-table-column :label="$t('common.actions')" width="220" fixed="right" align="right">
           <template #default="{ row }">
             <div class="flex justify-end gap-2">
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" plain @click="markIssued(row)">{{ $t('reg_codes.mark_issued') }}</el-button>
+              <el-button v-if="row.status === RegCodeStatus.binded" size="small" type="warning" plain @click="revoke(row)">{{ $t('reg_codes.revoke') }}</el-button>
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="danger" plain @click="del(row.id)">{{ $t('common.delete') }}</el-button>
             </div>
           </template>
@@ -105,7 +106,7 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, watch } from 'vue'
-import { fetchRegCodes, deleteRegCode, batchCreateRegCodes, updateRegCodeStatus } from '@/apis/reg_codes'
+import { fetchRegCodes, deleteRegCode, batchCreateRegCodes, updateRegCodeStatus, revokeRegCode } from '@/apis/reg_codes'
 import { fetchApps } from '@/apis/apps'
 import type { RegCodeModel, ListRegCodesParams, BatchCreateRegCodesReq } from '@/types/reg_codes'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -126,6 +127,7 @@ function statusTagType(status: RegCodeStatus) {
   if (status === RegCodeStatus.Unused) return 'info'
   if (status === RegCodeStatus.Issued) return 'success'
   if (status === RegCodeStatus.binded) return 'warning'
+  if (status === RegCodeStatus.Refunded) return 'danger'
   return 'info'
 }
 
@@ -163,6 +165,12 @@ async function markIssued(row: RegCodeModel) {
   await ElMessageBox.confirm(t('reg_codes.mark_issued_confirm'), t('common.confirm'), { type: 'warning' })
   await updateRegCodeStatus(row.id, RegCodeStatus.Issued)
   ElMessage.success(t('common.saved'))
+  reload()
+}
+async function revoke(row: RegCodeModel) {
+  await ElMessageBox.confirm(t('reg_codes.revoke_confirm'), t('common.confirm'), { type: 'warning' })
+  await revokeRegCode(row.id)
+  ElMessage.success(t('reg_codes.revoked'))
   reload()
 }
 async function batchDelete() {

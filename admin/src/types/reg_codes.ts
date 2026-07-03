@@ -26,6 +26,7 @@ export enum RegCodeStatus {
   Unused = 0,
   Issued = 1,
   binded = 2,
+  Refunded = 3,
 }
 
 export type ListRegCodesParams = {

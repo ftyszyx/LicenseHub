@@ -246,6 +246,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .put(apis::reg_codes_handler::update_status),
         )
         .push(
+            Router::with_path("reg_codes/{id}/revoke")
+                .hoop(RequirePerm::new("reg_codes", "UPDATE"))
+                .post(apis::reg_codes_handler::revoke),
+        )
+        .push(
             Router::with_path("reg_codes/{id}")
                 .hoop(RequirePerm::new("reg_codes", "DELETE"))
                 .delete(apis::reg_codes_handler::delete),

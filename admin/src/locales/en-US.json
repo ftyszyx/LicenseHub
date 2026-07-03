@@ -157,8 +157,12 @@
     "status_unused": "Unused",
     "status_issued": "Issued",
     "status_binded": "Binded",
+    "status_refunded": "Refunded",
     "mark_issued": "Mark Issued",
     "mark_issued_confirm": "Mark this code as issued?",
+    "revoke": "Refund",
+    "revoke_confirm": "Refund this code and remove its device entitlement? This cannot be undone.",
+    "revoked": "Code refunded",
     "status_locked": "Binded reg code status cannot be changed",
     "delete_locked": "Only unused reg codes can be deleted",
     "device_id": ""
