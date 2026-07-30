@@ -140,6 +140,90 @@ async fn test_public_products_list() {
 }
 
 #[tokio::test]
+async fn test_public_products_follow_configured_sort_order() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let create_app_body = json!({
+        "name": helpers::unique_name("SortedPayApp"),
+        "app_id": helpers::unique_name("com.sorted.pay.app"),
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/dl",
+        "app_res_url": "https://example.com/res",
+        "app_update_info": "",
+        "app_valid_key": helpers::unique_name("SORTKEY"),
+        "trial_days": 0,
+        "sort_order": 0,
+        "status": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&create_app_body)
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_sorted_pay_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let mut plan_ids = Vec::new();
+    for (name, sort_order) in [("last", 20), ("first", 10), ("second", 10)] {
+        let resp = TestClient::post(helpers::get_url("/api/admin/plans"))
+            .add_header("authorization", helpers::bearer(&ctx.token), true)
+            .add_header("content-type", "application/json", true)
+            .json(&json!({
+                "app_id": app_id,
+                "name": name,
+                "description": null,
+                "price_cents": 100,
+                "code_type": 0,
+                "valid_days": 30,
+                "total_count": null,
+                "status": 1,
+                "sort_order": sort_order
+            }))
+            .send(&ctx.app)
+            .await;
+        let json = helpers::print_response_body_get_json(resp, "create_sorted_plan").await;
+        plan_ids.push(json["data"]["id"].as_i64().unwrap());
+    }
+
+    let resp = TestClient::get(helpers::get_url(&format!("/api/products?app_id={app_id}")))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "sorted_public_products").await;
+    let ids: Vec<i64> = json["data"]["plans"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|plan| plan["id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(ids, vec![plan_ids[1], plan_ids[2], plan_ids[0]]);
+
+    let resp = TestClient::put(helpers::get_url(&format!(
+        "/api/admin/plans/{}",
+        plan_ids[0]
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({ "sort_order": 5 }))
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "update_plan_sort_order").await;
+    assert_eq!(json["data"]["sort_order"].as_i64().unwrap(), 5);
+
+    let resp = TestClient::get(helpers::get_url(&format!("/api/products?app_id={app_id}")))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "resorted_public_products").await;
+    assert_eq!(
+        json["data"]["plans"][0]["id"].as_i64().unwrap(),
+        plan_ids[0]
+    );
+}
+
+#[tokio::test]
 async fn test_public_products_hide_disabled_app_and_reject_order() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;

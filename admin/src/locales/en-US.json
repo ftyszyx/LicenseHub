@@ -185,6 +185,7 @@
     "app_id": "App ID",
     "add_valid_days": "Add valid days",
     "tags": "Tags",
+    "sort_order": "Sort Order",
     "status": "Status",
     "image_url": "Image URL",
     "remark": "Remark"

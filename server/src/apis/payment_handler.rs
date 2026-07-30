@@ -811,7 +811,8 @@ pub async fn list_plans(
     let page_size = params.pagination.page_size.unwrap_or(20);
     let mut query = license_plans::Entity::find()
         .find_also_related(apps::Entity)
-        .order_by_desc(license_plans::Column::CreatedAt);
+        .order_by_asc(license_plans::Column::SortOrder)
+        .order_by_asc(license_plans::Column::Id);
     if let Some(id) = params.id {
         query = query.filter(license_plans::Column::Id.eq(id));
     }

@@ -38,6 +38,7 @@
         <el-table-column :label="$t('reg_codes.total_count')" width="120">
           <template #default="{ row }">{{ row.code_type === RegCodeType.Count ? row.total_count : '-' }}</template>
         </el-table-column>
+        <el-table-column prop="sort_order" :label="$t('products.sort_order')" width="100" />
         <el-table-column prop="status" :label="$t('products.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === PlanStatus.Enabled ? 'success' : 'info'">
@@ -83,6 +84,9 @@
         </el-form-item>
         <el-form-item v-else :label="$t('reg_codes.total_count')">
           <el-input-number v-model.number="dialog.form.total_count" :min="1" />
+        </el-form-item>
+        <el-form-item :label="$t('products.sort_order')">
+          <el-input-number v-model.number="dialog.form.sort_order" :min="0" :step="1" step-strictly />
         </el-form-item>
         <el-form-item :label="$t('products.status')">
           <el-switch v-model="dialog.enabled" />

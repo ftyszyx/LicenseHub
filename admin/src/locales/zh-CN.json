@@ -212,6 +212,7 @@
     "add_valid_days": "增加有效天数",
     "image_url": "图片地址",
     "tags": "标签",
+    "sort_order": "排序",
     "status": "状态",
     "status_1": "上架",
     "status_0": "下架",
