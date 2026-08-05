@@ -739,8 +739,7 @@ pub async fn list_payment_channels(
 ) -> Result<ApiResponse<PagingResponse<PaymentChannelInfo>>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let params = req.parse_queries::<ListPaymentChannelsParams>()?;
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = payment_channels::Entity::find()
         .order_by_asc(payment_channels::Column::SortOrder)
         .order_by_asc(payment_channels::Column::Id);
@@ -845,8 +844,7 @@ pub async fn list_plans(
 ) -> Result<ApiResponse<PagingResponse<PlanInfo>>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let params = req.parse_queries::<ListPlansParams>()?;
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = license_plans::Entity::find()
         .find_also_related(apps::Entity)
         .order_by_asc(license_plans::Column::SortOrder)
@@ -1039,8 +1037,7 @@ pub async fn list_orders(
 ) -> Result<ApiResponse<PagingResponse<OrderInfo>>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let params = req.parse_queries::<ListOrdersParams>()?;
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = orders::Entity::find()
         .find_also_related(license_plans::Entity)
         .find_also_related(apps::Entity)
@@ -1119,7 +1116,6 @@ pub async fn confirm_order_refund_impl(
 
     if let Some(commission) = distribution_commissions::Entity::find()
         .filter(distribution_commissions::Column::OrderId.eq(order.id))
-        .lock_exclusive()
         .one(&tx)
         .await?
     {

@@ -20,6 +20,13 @@ async fn test_get_users_list() {
     assert!(json["data"]["list"].is_array());
     assert!(json["data"]["total"].is_number());
     assert!(json["data"]["page"].is_number());
+    assert!(
+        json["data"]["list"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["user"].get("password").is_none())
+    );
 }
 
 #[tokio::test]
@@ -68,6 +75,7 @@ async fn test_create_user() {
     assert!(json["success"].as_bool().unwrap());
     assert!(json["data"]["user"]["id"].is_number());
     assert!(json["data"]["user"]["username"].is_string());
+    assert!(json["data"]["user"].get("password").is_none());
 }
 
 #[tokio::test]
@@ -95,6 +103,7 @@ async fn test_get_user_by_id() {
     let json = helpers::print_response_body_get_json(response, "get_user_by_id").await;
     assert!(json["success"].as_bool().unwrap());
     assert_eq!(json["data"]["user"]["id"].as_i64().unwrap(), user_id);
+    assert!(json["data"]["user"].get("password").is_none());
 }
 
 #[tokio::test]

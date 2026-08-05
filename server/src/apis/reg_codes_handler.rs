@@ -634,8 +634,7 @@ pub async fn get_list_impl(
     state: &AppState,
     params: SearchRegCodesParams,
 ) -> Result<PagingResponse<RegCodeInfo>, AppError> {
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
 
     let mut query = reg_codes::Entity::find()
         .find_also_related(apps::Entity)

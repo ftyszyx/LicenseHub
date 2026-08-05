@@ -148,6 +148,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "uuid",
  "validator",
 ]
@@ -791,6 +792,7 @@ dependencies = [
  "chrono",
  "sea-orm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

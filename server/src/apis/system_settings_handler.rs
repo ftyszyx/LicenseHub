@@ -6,7 +6,9 @@ use chrono::Utc;
 use data_model::system_settings;
 use salvo::oapi::extract::JsonBody;
 use salvo::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 
 const STOREFRONT_TITLE_KEY: &str = "storefront_title";
@@ -130,31 +132,33 @@ pub async fn update_system_settings_impl(
     req: UpdateSystemSettingsReq,
 ) -> Result<SiteSettingsInfo, AppError> {
     let storefront_title = normalize_storefront_title(req.storefront_title)?;
-    upsert_setting(state, STOREFRONT_TITLE_KEY, storefront_title).await?;
+    let mut updates = vec![(STOREFRONT_TITLE_KEY, storefront_title)];
     if let Some(value) = req.distribution_enabled {
-        upsert_setting(state, DISTRIBUTION_ENABLED_KEY, value.to_string()).await?;
+        updates.push((DISTRIBUTION_ENABLED_KEY, value.to_string()));
     }
     if let Some(value) = req.distribution_default_rate_bps {
         validate_range("distribution_default_rate_bps", value, 0, 10000)?;
-        upsert_setting(state, DISTRIBUTION_DEFAULT_RATE_BPS_KEY, value.to_string()).await?;
+        updates.push((DISTRIBUTION_DEFAULT_RATE_BPS_KEY, value.to_string()));
     }
     if let Some(value) = req.distribution_attribution_days {
         validate_range("distribution_attribution_days", value, 1, 3650)?;
-        upsert_setting(state, DISTRIBUTION_ATTRIBUTION_DAYS_KEY, value.to_string()).await?;
+        updates.push((DISTRIBUTION_ATTRIBUTION_DAYS_KEY, value.to_string()));
     }
     if let Some(value) = req.distribution_holding_days {
         validate_range("distribution_holding_days", value, 0, 3650)?;
-        upsert_setting(state, DISTRIBUTION_HOLDING_DAYS_KEY, value.to_string()).await?;
+        updates.push((DISTRIBUTION_HOLDING_DAYS_KEY, value.to_string()));
     }
     if let Some(value) = req.distribution_min_withdraw_cents {
         validate_range("distribution_min_withdraw_cents", value, 0, i32::MAX)?;
-        upsert_setting(
-            state,
-            DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY,
-            value.to_string(),
-        )
-        .await?;
+        updates.push((DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY, value.to_string()));
     }
+
+    let tx = state.db.begin().await?;
+    for (key, value) in updates {
+        upsert_setting(&tx, key, value).await?;
+    }
+    tx.commit().await?;
+
     get_site_settings_impl(state, true).await
 }
 
@@ -224,7 +228,7 @@ pub async fn generate_license_signing_key_impl(
         ));
     }
     let private_key_b64 = generate_private_key_b64()?;
-    upsert_setting(state, LICENSE_SIGNING_PRIVATE_KEY_KEY, private_key_b64).await?;
+    upsert_setting(&state.db, LICENSE_SIGNING_PRIVATE_KEY_KEY, private_key_b64).await?;
     get_site_settings_impl(state, true).await
 }
 
@@ -241,11 +245,14 @@ async fn get_setting_value(state: &AppState, key: &str) -> Result<Option<String>
     Ok(get_setting(state, key).await?.map(|setting| setting.value))
 }
 
-async fn upsert_setting(state: &AppState, key: &str, value: String) -> Result<(), AppError> {
+async fn upsert_setting<C>(db: &C, key: &str, value: String) -> Result<(), AppError>
+where
+    C: ConnectionTrait,
+{
     let now = Utc::now().fixed_offset();
     let existing = system_settings::Entity::find()
         .filter(system_settings::Column::Key.eq(key))
-        .one(&state.db)
+        .one(db)
         .await?;
 
     match existing {
@@ -253,7 +260,7 @@ async fn upsert_setting(state: &AppState, key: &str, value: String) -> Result<()
             let mut active: system_settings::ActiveModel = setting.into();
             active.value = Set(value);
             active.updated_at = Set(now);
-            active.update(&state.db).await?;
+            active.update(db).await?;
         }
         None => {
             system_settings::ActiveModel {
@@ -262,7 +269,7 @@ async fn upsert_setting(state: &AppState, key: &str, value: String) -> Result<()
                 created_at: Set(now),
                 updated_at: Set(now),
             }
-            .insert(&state.db)
+            .insert(db)
             .await?;
         }
     }

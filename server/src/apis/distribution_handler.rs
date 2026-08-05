@@ -188,6 +188,33 @@ async fn release_available(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
+async fn lock_distribution_user(
+    tx: &DatabaseTransaction,
+    user_id: i32,
+) -> Result<users::Model, AppError> {
+    users::Entity::find_by_id(user_id)
+        .lock_exclusive()
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("user", Some(user_id)))
+}
+
+async fn lock_settlement_after_user(
+    tx: &DatabaseTransaction,
+    settlement_id: i64,
+) -> Result<distribution_settlements::Model, AppError> {
+    let settlement = distribution_settlements::Entity::find_by_id(settlement_id)
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("distribution_settlements", None))?;
+    lock_distribution_user(tx, settlement.user_id).await?;
+    distribution_settlements::Entity::find_by_id(settlement_id)
+        .lock_exclusive()
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("distribution_settlements", None))
+}
+
 fn allocated_amount(commission: &distribution_commissions::Model) -> i32 {
     commission.locked_amount_cents
         + commission.settled_amount_cents
@@ -276,7 +303,7 @@ async fn outstanding_debt(tx: &DatabaseTransaction, user_id: i32) -> Result<i64,
         .sum())
 }
 
-async fn apply_outstanding_adjustments(
+async fn apply_outstanding_adjustments_with_user_lock(
     tx: &DatabaseTransaction,
     user_id: i32,
 ) -> Result<(), AppError> {
@@ -368,7 +395,8 @@ pub async fn my_summary(depot: &mut Depot) -> Result<ApiResponse<DistributionSum
     release_available(state).await?;
 
     let tx = state.db.begin().await?;
-    apply_outstanding_adjustments(&tx, claims.user_id).await?;
+    lock_distribution_user(&tx, claims.user_id).await?;
+    apply_outstanding_adjustments_with_user_lock(&tx, claims.user_id).await?;
     let debt = outstanding_debt(&tx, claims.user_id).await?;
     tx.commit().await?;
 
@@ -424,7 +452,8 @@ pub async fn my_commissions(
     require_distribution(state).await?;
     release_available(state).await?;
     let tx = state.db.begin().await?;
-    apply_outstanding_adjustments(&tx, claims.user_id).await?;
+    lock_distribution_user(&tx, claims.user_id).await?;
+    apply_outstanding_adjustments_with_user_lock(&tx, claims.user_id).await?;
     tx.commit().await?;
     let mut params = req.parse_queries::<CommissionListParams>()?;
     params.user_id = Some(claims.user_id);
@@ -447,8 +476,7 @@ async fn list_commissions(
     state: &AppState,
     params: CommissionListParams,
 ) -> Result<PagingResponse<CommissionInfo>, AppError> {
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = distribution_commissions::Entity::find()
         .find_also_related(orders::Entity)
         .find_also_related(users::Entity)
@@ -511,11 +539,7 @@ pub async fn create_settlement_impl(
     let account = normalize_account(req.alipay_account, req.real_name)?;
     let tx = state.db.begin().await?;
 
-    let user = users::Entity::find_by_id(user_id)
-        .lock_exclusive()
-        .one(&tx)
-        .await?
-        .ok_or_else(|| AppError::not_found("user", Some(user_id)))?;
+    let user = lock_distribution_user(&tx, user_id).await?;
     let existing = distribution_settlements::Entity::find()
         .filter(distribution_settlements::Column::UserId.eq(user_id))
         .filter(distribution_settlements::Column::Status.eq(SETTLEMENT_STATUS_PENDING))
@@ -528,7 +552,7 @@ pub async fn create_settlement_impl(
         ));
     }
 
-    apply_outstanding_adjustments(&tx, user_id).await?;
+    apply_outstanding_adjustments_with_user_lock(&tx, user_id).await?;
     let commissions = distribution_commissions::Entity::find()
         .filter(distribution_commissions::Column::UserId.eq(user_id))
         .filter(distribution_commissions::Column::Status.eq(COMMISSION_STATUS_AVAILABLE))
@@ -647,8 +671,7 @@ async fn list_settlements(
     state: &AppState,
     params: SettlementListParams,
 ) -> Result<PagingResponse<SettlementInfo>, AppError> {
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = distribution_settlements::Entity::find()
         .find_also_related(users::Entity)
         .order_by_desc(distribution_settlements::Column::CreatedAt);
@@ -680,7 +703,7 @@ async fn get_settlement_info(
     settlement_info(settlement, user.map(|value| value.username))
 }
 
-async fn reject_settlement_in_tx(
+async fn reject_settlement_with_user_lock(
     tx: &DatabaseTransaction,
     settlement: distribution_settlements::Model,
     operator_user_id: i32,
@@ -747,12 +770,9 @@ pub async fn reject_settlement(
     let req = req.into_inner();
     req.validate()?;
     let tx = state.db.begin().await?;
-    let settlement = distribution_settlements::Entity::find_by_id(id.into_inner())
-        .lock_exclusive()
-        .one(&tx)
-        .await?
-        .ok_or_else(|| AppError::not_found("distribution_settlements", None))?;
-    let settlement = reject_settlement_in_tx(&tx, settlement, claims.user_id, req.reason).await?;
+    let settlement = lock_settlement_after_user(&tx, id.into_inner()).await?;
+    let settlement =
+        reject_settlement_with_user_lock(&tx, settlement, claims.user_id, req.reason).await?;
     tx.commit().await?;
     Ok(ApiResponse::success(
         get_settlement_info(state, settlement.id).await?,
@@ -803,11 +823,7 @@ pub async fn mark_settlement_paid_impl(
 ) -> Result<SettlementInfo, AppError> {
     let proof = validate_payment_proof(proof)?;
     let tx = state.db.begin().await?;
-    let settlement = distribution_settlements::Entity::find_by_id(settlement_id)
-        .lock_exclusive()
-        .one(&tx)
-        .await?
-        .ok_or_else(|| AppError::not_found("distribution_settlements", None))?;
+    let settlement = lock_settlement_after_user(&tx, settlement_id).await?;
     if settlement.status == SETTLEMENT_STATUS_PAID {
         tx.commit().await?;
         return get_settlement_info(state, settlement_id).await;
@@ -1014,8 +1030,7 @@ async fn list_adjustments(
     state: &AppState,
     params: AdjustmentListParams,
 ) -> Result<PagingResponse<AdjustmentInfo>, AppError> {
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = distribution_commission_adjustments::Entity::find()
         .find_also_related(orders::Entity)
         .find_also_related(users::Entity)
@@ -1055,6 +1070,12 @@ pub(crate) async fn handle_commission_refund(
     commission: distribution_commissions::Model,
     operator_user_id: i32,
 ) -> Result<(), AppError> {
+    lock_distribution_user(tx, commission.user_id).await?;
+    let commission = distribution_commissions::Entity::find_by_id(commission.id)
+        .lock_exclusive()
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("distribution_commissions", None))?;
     let linked = distribution_settlement_items::Entity::find()
         .filter(distribution_settlement_items::Column::CommissionId.eq(commission.id))
         .find_also_related(distribution_settlements::Entity)
@@ -1072,7 +1093,7 @@ pub(crate) async fn handle_commission_refund(
             .one(tx)
             .await?
             .ok_or_else(|| AppError::not_found("distribution_settlements", None))?;
-        reject_settlement_in_tx(
+        reject_settlement_with_user_lock(
             tx,
             settlement,
             operator_user_id,
@@ -1081,11 +1102,6 @@ pub(crate) async fn handle_commission_refund(
         .await?;
     }
 
-    let commission = distribution_commissions::Entity::find_by_id(commission.id)
-        .lock_exclusive()
-        .one(tx)
-        .await?
-        .ok_or_else(|| AppError::not_found("distribution_commissions", None))?;
     let exposed_amount = commission.settled_amount_cents + commission.adjustment_amount_cents;
     let cancelled_amount =
         (commission.commission_amount_cents - exposed_amount - commission.locked_amount_cents)
@@ -1125,7 +1141,7 @@ pub(crate) async fn handle_commission_refund(
         }
         .insert(tx)
         .await?;
-        apply_outstanding_adjustments(tx, commission.user_id).await?;
+        apply_outstanding_adjustments_with_user_lock(tx, commission.user_id).await?;
     }
     Ok(())
 }

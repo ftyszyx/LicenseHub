@@ -291,8 +291,7 @@ pub async fn list_storage_channels(
 ) -> Result<ApiResponse<PagingResponse<StorageChannelInfo>>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let params = req.parse_queries::<ListStorageChannelsParams>()?;
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = storage_channels::Entity::find()
         .order_by_asc(storage_channels::Column::SortOrder)
         .order_by_asc(storage_channels::Column::Id);
@@ -378,8 +377,7 @@ pub async fn list_version_sync_logs(
 ) -> Result<ApiResponse<PagingResponse<VersionSyncLogInfo>>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let params = req.parse_queries::<ListVersionSyncLogsParams>()?;
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = app_version_sync_logs::Entity::find()
         .order_by_desc(app_version_sync_logs::Column::CreatedAt)
         .order_by_desc(app_version_sync_logs::Column::Id);

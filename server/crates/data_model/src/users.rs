@@ -10,6 +10,7 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(unique)]
     pub username: String,
+    #[serde(skip_serializing)]
     pub password: String,
     #[sea_orm(unique)]
     pub referral_code: String,
@@ -84,3 +85,28 @@ impl Related<super::roles::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialized_user_omits_password() {
+        let now = chrono::Utc::now().fixed_offset();
+        let user = Model {
+            id: 1,
+            username: "admin".to_string(),
+            password: "bcrypt-hash".to_string(),
+            referral_code: "LHREFERRAL".to_string(),
+            commission_rate_bps: None,
+            settlement_account: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let value = serde_json::to_value(user).unwrap();
+
+        assert!(value.get("password").is_none());
+        assert_eq!(value["username"], "admin");
+    }
+}

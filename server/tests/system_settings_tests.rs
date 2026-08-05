@@ -50,6 +50,35 @@ async fn test_system_settings_storefront_title() {
 }
 
 #[tokio::test]
+async fn test_invalid_system_settings_update_is_atomic() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let resp = TestClient::put(helpers::get_url("/api/admin/system-settings"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "storefront_title": "Must Not Persist",
+            "distribution_enabled": true,
+            "distribution_default_rate_bps": 10001
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "invalid_atomic_settings_update").await;
+    assert!(!json["success"].as_bool().unwrap());
+
+    let resp = TestClient::get(helpers::get_url("/api/site-settings"))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "settings_after_invalid_update").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["storefront_title"], "LicenseHub");
+    assert_eq!(json["data"]["distribution"]["enabled"], false);
+    assert_eq!(json["data"]["distribution"]["default_rate_bps"], 2000);
+}
+
+#[tokio::test]
 async fn test_generate_license_signing_key_returns_admin_keys_only() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;

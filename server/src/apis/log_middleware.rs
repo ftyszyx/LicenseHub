@@ -22,7 +22,7 @@ pub async fn log_response_body(
 
     let path = req.uri().path().to_string();
     let method = req.method().to_string();
-    let query = req.uri().query().unwrap_or("").to_string();
+    let query = redact_query(req.uri().query().unwrap_or(""));
     let req_content_type = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -174,6 +174,30 @@ fn redact_json(value: &mut Value) {
     }
 }
 
+fn redact_query(query: &str) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        let value = if is_sensitive_query_key(&key) {
+            "***"
+        } else {
+            value.as_ref()
+        };
+        serializer.append_pair(&key, value);
+    }
+    serializer.finish()
+}
+
+fn is_sensitive_query_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    is_sensitive_key(&key)
+        || key == "code"
+        || key.ends_with("_code")
+        || key == "key"
+        || key.ends_with("_key")
+        || key == "device_id"
+        || key.ends_with("_device_id")
+}
+
 fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     key.contains("password")
@@ -206,6 +230,26 @@ mod tests {
         assert!(!preview.contains("demo@example.com"));
         assert!(!preview.contains("Demo"));
         assert!(!preview.contains("abc"));
+    }
+
+    #[test]
+    fn query_preview_redacts_license_credentials() {
+        let query = concat!(
+            "page=2&status=1&code=LH-SECRET&reg_code=REG-SECRET&",
+            "app_key=APP-SECRET&device_id=DEVICE-SECRET&access_token=TOKEN-SECRET"
+        );
+
+        let redacted = redact_query(query);
+        let values = url::form_urlencoded::parse(redacted.as_bytes())
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(values.get("page").map(String::as_str), Some("2"));
+        assert_eq!(values.get("status").map(String::as_str), Some("1"));
+        for key in ["code", "reg_code", "app_key", "device_id", "access_token"] {
+            assert_eq!(values.get(key).map(String::as_str), Some("***"));
+        }
+        assert!(!redacted.contains("SECRET"));
     }
 
     #[test]

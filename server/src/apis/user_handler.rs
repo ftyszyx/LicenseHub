@@ -232,8 +232,7 @@ pub async fn get_list_impl(
     state: &AppState,
     params: SearchUsersParams,
 ) -> Result<PagingResponse<UserWithRoles>, AppError> {
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
 
     let mut query = users::Entity::find().order_by_desc(users::Column::CreatedAt);
     if let Some(v) = params.id {

@@ -1,8 +1,13 @@
-use app_server::apis::payment_handler::{OrderStatus, process_payment_notification};
+use app_server::apis::distribution_handler::{SettlementPaymentProof, mark_settlement_paid_impl};
+use app_server::apis::payment_handler::{
+    ConfirmOrderRefundReq, OrderStatus, confirm_order_refund_impl, process_payment_notification,
+};
+use app_server::core::my_error::AppError;
 use payment_adapter::{PaymentNotification, PaymentStatus};
 use salvo::prelude::*;
 use salvo::test::TestClient;
 use serde_json::json;
+use std::time::Duration;
 
 mod helpers;
 
@@ -480,6 +485,96 @@ async fn test_refund_rejects_pending_withdrawal_and_releases_locked_commission()
     .await
     .unwrap();
     assert_eq!(commission, (4, 0, 2000));
+}
+
+#[tokio::test]
+async fn test_refund_and_payment_confirmation_serialize_on_distribution_user() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    enable_distribution(&pool, 0, 100).await;
+    let (order_id, _) =
+        create_delivered_referral_order(&ctx, &pool, 10_000, "ConcurrentRefund").await;
+
+    let resp = TestClient::get(helpers::get_url("/api/admin/me/distribution/summary"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    let summary =
+        helpers::print_response_body_get_json(resp, "release_concurrent_commission").await;
+    assert_eq!(
+        summary["data"]["available_amount_cents"].as_i64(),
+        Some(2000)
+    );
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/me/distribution/settlements"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "amount_cents": 2000,
+            "alipay_account": "concurrent@example.com",
+            "real_name": "Concurrent Test"
+        }))
+        .send(&ctx.app)
+        .await;
+    let settlement =
+        helpers::print_response_body_get_json(resp, "create_concurrent_settlement").await;
+    let settlement_id = settlement["data"]["id"].as_i64().unwrap();
+
+    let mut blocker = pool.begin().await.unwrap();
+    sqlx::query("select id from users where id = 1 for update")
+        .fetch_one(&mut *blocker)
+        .await
+        .unwrap();
+
+    let refund_state = ctx.app_state.clone();
+    let refund_task = tokio::spawn(async move {
+        confirm_order_refund_impl(
+            &refund_state,
+            1,
+            order_id,
+            ConfirmOrderRefundReq {
+                refund_reference: "CONCURRENT-REFUND-001".to_string(),
+                reason: "concurrent refund test".to_string(),
+            },
+        )
+        .await
+    });
+    let paid_state = ctx.app_state.clone();
+    let paid_task = tokio::spawn(async move {
+        mark_settlement_paid_impl(
+            &paid_state,
+            1,
+            settlement_id,
+            SettlementPaymentProof {
+                payment_reference: "CONCURRENT-PAYMENT-001".to_string(),
+                file_name: "proof.png".to_string(),
+                content_type: "image/png".to_string(),
+                content: vec![137, 80, 78, 71],
+            },
+        )
+        .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!refund_task.is_finished());
+    assert!(!paid_task.is_finished());
+    blocker.commit().await.unwrap();
+
+    let (refund_result, paid_result) = tokio::time::timeout(Duration::from_secs(10), async {
+        (refund_task.await.unwrap(), paid_task.await.unwrap())
+    })
+    .await
+    .expect("distribution operations should finish without a database deadlock");
+    assert!(refund_result.is_ok(), "refund failed: {refund_result:?}");
+    match paid_result {
+        Ok(settlement) => assert_eq!(settlement.status, 1),
+        Err(AppError::BusinessLogic { code, .. }) => {
+            assert_eq!(code, "SETTLEMENT_NOT_PENDING")
+        }
+        Err(error) => panic!("unexpected payment confirmation error: {error}"),
+    }
 }
 
 #[tokio::test]

@@ -59,8 +59,7 @@ pub async fn get_list_impl(
     state: &AppState,
     params: SearchDevicesParams,
 ) -> Result<PagingResponse<DeviceInfo>, AppError> {
-    let page = params.pagination.page.unwrap_or(1);
-    let page_size = params.pagination.page_size.unwrap_or(20);
+    let (page, page_size) = params.pagination.resolve()?;
     let mut query = app_devices::Entity::find()
         .find_also_related(apps::Entity)
         .order_by_desc(app_devices::Column::CreatedAt);
