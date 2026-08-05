@@ -1,6 +1,7 @@
 import request from '@/utils/request'
 import type { ApiResponse, PagingResponse } from '@/types'
 import type {
+  ConfirmOrderRefundReq,
   CreateOrderReq,
   LicensePlan,
   ListOrdersParams,
@@ -65,6 +66,11 @@ export const deletePlan = async (id: number) => {
 
 export const fetchOrders = async (params: ListOrdersParams = {}) => {
   const response = await request.get('/admin/orders/list', { params }) as ApiResponse<PagingResponse<OrderModel>>
+  return response.data
+}
+
+export const confirmOrderRefund = async (id: number, payload: ConfirmOrderRefundReq) => {
+  const response = await request.post(`/admin/orders/${id}/refund`, payload) as ApiResponse<OrderModel>
   return response.data
 }
 

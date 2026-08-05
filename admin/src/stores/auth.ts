@@ -5,7 +5,10 @@ import { sentLogin, sentRegister } from '@/apis'
 
 type JwtPayload = {
   exp?: number
+  role_ids?: number[]
 }
+
+const ADMIN_ROLE_ID = 1
 
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
@@ -26,9 +29,22 @@ function isTokenUsable(token: string | null) {
   }
 }
 
+function decodeToken(token: string | null): JwtPayload | null {
+  if (!token) return null
+  const [, payload] = token.split('.')
+  if (!payload) return null
+  try {
+    return JSON.parse(decodeBase64Url(payload)) as JwtPayload
+  } catch {
+    return null
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token'))
   const isAuthenticated = computed(() => isTokenUsable(token.value))
+  const roleIds = computed(() => decodeToken(token.value)?.role_ids || [])
+  const isAdmin = computed(() => roleIds.value.includes(ADMIN_ROLE_ID))
 
   if (token.value && !isTokenUsable(token.value)) {
     localStorage.removeItem('token')
@@ -65,5 +81,5 @@ export const useAuthStore = defineStore('auth', () => {
     clearToken()
   }
 
-  return { token, isAuthenticated, hasValidSession, login, logout, register, clearToken }
+  return { token, isAuthenticated, roleIds, isAdmin, hasValidSession, login, logout, register, clearToken }
 })

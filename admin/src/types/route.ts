@@ -7,6 +7,9 @@ export enum RouteName {
     Login = 'login',
     Register = 'register',
     Admin = 'admin',
+    User = 'user',
+    UserHome = 'user_home',
+    UserDistribution = 'user_distribution',
     AdminDashboard = 'dashboard',
     AdminProducts = 'admin_products',
     AdminOrders = 'orders',
@@ -22,6 +25,7 @@ export enum RouteName {
     AdminUseRecords = 'use_records',
     AdminDevices = 'devices',
     AdminPermissions = 'permissions',
+    AdminDistribution = 'distribution_commissions',
 }
 
 
@@ -33,6 +37,9 @@ export enum RoutePath {
     Login = '/' + RouteName.Login,
     Register = '/' + RouteName.Register,
     Admin = '/' + RouteName.Admin,
+    User = '/' + RouteName.User,
+    UserHome = '/' + RouteName.User + '/home',
+    UserDistribution = '/' + RouteName.User + '/distribution',
     AdminDashboard = '/' + RouteName.Admin + '/' + RouteName.AdminDashboard,
     AdminProducts = '/' + RouteName.Admin + '/products',
     AdminOrders = '/' + RouteName.Admin + '/' + RouteName.AdminOrders,
@@ -48,4 +55,5 @@ export enum RoutePath {
     AdminUseRecords = '/' + RouteName.Admin + '/' + RouteName.AdminUseRecords,
     AdminDevices = '/' + RouteName.Admin + '/' + RouteName.AdminDevices,
     AdminPermissions = '/' + RouteName.Admin + '/' + RouteName.AdminPermissions,
+    AdminDistribution = '/' + RouteName.Admin + '/' + RouteName.AdminDistribution,
 }

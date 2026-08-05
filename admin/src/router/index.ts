@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '@/layouts/AdminLayout.vue'
+import UserLayout from '@/layouts/UserLayout.vue'
 import DashboardView from '@/views/admin/DashboardView.vue'
 import UserAdminView from '@/views/admin/UserAdminView.vue'
 import AppAdminView from '@/views/admin/AppAdminView.vue'
@@ -18,9 +19,22 @@ import PayResultView from '@/views/PayResultView.vue'
 import OrderQueryView from '@/views/OrderQueryView.vue'
 import RegApiTestView from '@/views/admin/RegApiTestView.vue'
 import UseRecordsAdminView from '@/views/admin/UseRecordsAdminView.vue'
+import UserHomeView from '@/views/user/UserHomeView.vue'
+import DistributionCenterView from '@/views/admin/DistributionCenterView.vue'
+import DistributionAdminView from '@/views/admin/DistributionAdminView.vue'
 
 import { useAuthStore } from '@/stores/auth'
+import { fetchSiteSettings } from '@/apis/system_settings'
 import { RouteName, RoutePath } from '@/types'
+
+async function requireDistributionEnabled() {
+    try {
+        const settings = await fetchSiteSettings()
+        return settings.distribution?.enabled ? true : RoutePath.UserHome
+    } catch {
+        return RoutePath.UserHome
+    }
+}
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -67,9 +81,28 @@ const router = createRouter({
             component: RegisterView
         },
         {
+            path: RoutePath.User,
+            component: UserLayout,
+            meta: { requiresAuth: true, userArea: true },
+            redirect: RoutePath.UserHome,
+            children: [
+                {
+                    path: RoutePath.UserHome,
+                    name: RouteName.UserHome,
+                    component: UserHomeView
+                },
+                {
+                    path: RoutePath.UserDistribution,
+                    name: RouteName.UserDistribution,
+                    component: DistributionCenterView,
+                    beforeEnter: requireDistributionEnabled
+                }
+            ]
+        },
+        {
             path: RoutePath.Admin,
             component: AdminLayout,
-            meta: { requiresAuth: true },
+            meta: { requiresAuth: true, requiresAdmin: true },
             redirect: RoutePath.AdminDashboard,
             children: [
                 {
@@ -101,6 +134,11 @@ const router = createRouter({
                     path: RoutePath.AdminOrders,
                     name: RouteName.AdminOrders,
                     component: OrdersAdminView
+                },
+                {
+                    path: RoutePath.AdminDistribution,
+                    name: RouteName.AdminDistribution,
+                    component: DistributionAdminView
                 },
                 {
                     path: RoutePath.AdminPaymentSettings,
@@ -152,9 +190,17 @@ router.beforeEach((to, _, next) => {
     const authStore = useAuthStore()
     if (to.meta.requiresAuth && !authStore.hasValidSession()) {
         next({ name: 'login' })
-    } else {
-        next()
+        return
     }
+    if (to.meta.requiresAdmin && !authStore.isAdmin) {
+        next(RoutePath.UserHome)
+        return
+    }
+    if (to.meta.userArea && authStore.isAdmin) {
+        next(RoutePath.AdminDashboard)
+        return
+    }
+    next()
 })
 
 export default router

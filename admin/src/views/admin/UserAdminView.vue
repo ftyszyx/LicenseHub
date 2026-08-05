@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { formatTime } from '@/utils'
-import { fetchUsers, createUser, updateUser, deleteUser } from '@/apis/users'
+import { fetchUsers, createUser, updateUser, deleteUser, resetReferralCode } from '@/apis/users'
 import { fetchRoles } from '@/apis/roles'
 import { useI18n } from 'vue-i18n'
 import type { UserWithRoles } from '@/types/user'
@@ -31,10 +31,10 @@ function handlePageChange(p: number) { page.value = p; reload() }
 function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reload() }
 const dialog = reactive({ visible: false, mode: 'create' as 'create' | 'edit', editingId: undefined as number | undefined })
 const formRef = ref<FormInstance>()
-const form = reactive<{ username: string; password?: string; role_ids?: number[] }>({ username: '', password: '', role_ids: [] })
+const form = reactive<{ username: string; password?: string; role_ids?: number[]; commission_rate_percent?: number | null }>({ username: '', password: '', role_ids: [], commission_rate_percent: null })
 const rules = reactive<FormRules>({ username: [{ required: true, message: 'Username required' }] })
-function openCreate() { dialog.mode = 'create'; dialog.editingId = undefined; form.username = ''; form.password = ''; form.role_ids = []; dialog.visible = true }
-function openEdit(row: UserWithRoles) { dialog.mode = 'edit'; dialog.editingId = row.user.id; form.username = row.user.username; form.password = ''; form.role_ids = [...(row.role_ids || [])]; dialog.visible = true }
+function openCreate() { dialog.mode = 'create'; dialog.editingId = undefined; form.username = ''; form.password = ''; form.role_ids = []; form.commission_rate_percent = null; dialog.visible = true }
+function openEdit(row: UserWithRoles) { dialog.mode = 'edit'; dialog.editingId = row.user.id; form.username = row.user.username; form.password = ''; form.role_ids = [...(row.role_ids || [])]; form.commission_rate_percent = row.user.commission_rate_bps == null ? null : row.user.commission_rate_bps / 100; dialog.visible = true }
 
 function roleNames(roleIds: number[]) {
   const names = roleIds
@@ -46,10 +46,11 @@ async function submit() {
   const valid = await formRef.value?.validate();
   if (!valid) { ElMessage.error(t('common.please_check_form') as string); return }
   if (dialog.mode === 'create') { await createUser({ username: form.username, password: form.password || '', role_ids: form.role_ids }); ElMessage.success(t('common.created') as string) }
-  else if (dialog.editingId != null) { await updateUser(dialog.editingId, { username: form.username, role_ids: form.role_ids }); ElMessage.success(t('common.save') as string) }
+  else if (dialog.editingId != null) { await updateUser(dialog.editingId, { username: form.username, role_ids: form.role_ids, commission_rate_bps: form.commission_rate_percent == null ? null : Math.round(form.commission_rate_percent * 100) }); ElMessage.success(t('common.save') as string) }
   dialog.visible = false; await reload()
 }
 async function del(id: number) { await ElMessageBox.confirm(t('common.delete_confirm', { name: rows.value.find(it => it.user.id === id)?.user.username || '' }), t('common.confirm'), { type: 'warning' }); await deleteUser(id); ElMessage.success(t('common.deleted') as string); reload() }
+async function resetCode(id: number) { await resetReferralCode(id); ElMessage.success('推广码已重置'); await reload() }
 onMounted(() => { reload(); reloadRoles() })
 </script>
 
@@ -78,12 +79,17 @@ onMounted(() => { reload(); reloadRoles() })
         <el-table-column :label="$t('menu.roles')" min-width="140">
           <template #default="{ row }">{{ roleNames(row.role_ids || []) }}</template>
         </el-table-column>
+        <el-table-column label="推广码" min-width="150" prop="user.referral_code" />
+        <el-table-column label="佣金比例" width="110">
+          <template #default="{ row }">{{ row.user.commission_rate_bps == null ? '默认' : `${(row.user.commission_rate_bps / 100).toFixed(2)}%` }}</template>
+        </el-table-column>
         <el-table-column :label="$t('orders.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.user.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="200" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openEdit(row)">{{ $t('common.edit') }}</el-button>
+            <el-button size="small" @click="resetCode(row.user.id)">重置推广码</el-button>
             <el-button size="small" type="danger" @click="del(row.user.id)">{{ $t('common.delete') }}</el-button>
           </template>
         </el-table-column>
@@ -107,6 +113,10 @@ onMounted(() => { reload(); reloadRoles() })
         </el-form-item>
         <el-form-item v-if="dialog.mode === 'create'" :label="$t('auth.password')" prop="password"><el-input
             v-model="form.password" type="password" /></el-form-item>
+        <el-form-item v-if="dialog.mode === 'edit'" label="个人佣金比例">
+          <el-input-number v-model="form.commission_rate_percent" :min="0" :max="100" :precision="2" clearable />
+          <span class="ml-2 text-sm text-gray-500">%，留空使用系统默认值</span>
+        </el-form-item>
       </el-form>
 
       <template #footer>

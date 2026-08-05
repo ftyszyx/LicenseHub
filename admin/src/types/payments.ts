@@ -12,6 +12,15 @@ export enum OrderStatus {
   Delivered = 2,
   Failed = 3,
   Closed = 4,
+  Refunded = 5,
+}
+
+export interface OrderRefundInfo {
+  refund_no: string
+  refund_reference: string
+  reason: string
+  operator_user_id: number
+  refunded_at: string
 }
 
 export interface LicensePlan {
@@ -76,6 +85,7 @@ export interface OrderModel {
   url_scheme?: string | null
   reg_code_id?: number | null
   reg_code?: string | null
+  refund?: OrderRefundInfo | null
   paid_at?: string | null
   created_at: string
   updated_at: string
@@ -91,6 +101,12 @@ export type ListOrdersParams = {
 export interface CreateOrderReq {
   plan_id: number
   pay_type: string
+  referral_code?: string
+}
+
+export interface ConfirmOrderRefundReq {
+  refund_reference: string
+  reason: string
 }
 
 export interface PayMethodInfo {

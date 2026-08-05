@@ -8,13 +8,13 @@ use crate::utils::license_signing::{
     LicensePayload, SignedLicense, app_key_hash, public_key_b64_from_private_key, sign_license,
 };
 use chrono::{DateTime, FixedOffset, Utc};
-use data_model::{app_devices, apps, reg_codes};
+use data_model::{app_devices, apps, orders, reg_codes};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::extract::PathParam;
 use salvo_oapi::{ToSchema, endpoint};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -500,6 +500,18 @@ pub async fn revoke_impl(state: &AppState, id: i32) -> Result<RegCodeInfo, AppEr
         .await?
         .ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
 
+    let delivered_order = orders::Entity::find()
+        .filter(orders::Column::RegCodeId.eq(id))
+        .filter(orders::Column::Status.eq(2))
+        .one(&tx)
+        .await?;
+    if delivered_order.is_some() {
+        return Err(AppError::business_logic(
+            "ORDER_REFUND_REQUIRED",
+            "paid order registration codes must be revoked through order refund confirmation",
+        ));
+    }
+
     match RegCodeStatus::from(reg_code.status) {
         RegCodeStatus::Binded => {}
         RegCodeStatus::Refunded => {
@@ -516,46 +528,72 @@ pub async fn revoke_impl(state: &AppState, id: i32) -> Result<RegCodeInfo, AppEr
         }
     }
 
-    let device_id = reg_code.device_id.ok_or_else(|| {
-        AppError::business_logic(
-            "REG_CODE_DEVICE_NOT_FOUND",
-            "reg code is not bound to a device",
-        )
-    })?;
-    let device = app_devices::Entity::find_by_id(device_id)
-        .lock_exclusive()
-        .one(&tx)
-        .await?
-        .ok_or_else(|| AppError::not_found("app_devices".to_string(), Some(device_id)))?;
+    let updated_reg_code = apply_reg_code_revocation(&tx, reg_code).await?;
+    tx.commit().await?;
 
-    let now = Utc::now().fixed_offset();
-    let current_expire_time = device.expire_time;
-    let current_remaining = device.remaining;
-    let mut active_device = device.into_active_model();
-    match CodeType::from(reg_code.code_type) {
-        CodeType::Time => {
-            let expire_time = current_expire_time.unwrap_or(now);
-            let revoked_expire_time =
-                expire_time - chrono::Duration::days(reg_code.valid_days as i64);
-            active_device.expire_time = Set(Some(revoked_expire_time));
-        }
-        CodeType::Count => {
-            let revoked_remaining =
-                (current_remaining.unwrap_or(0) - reg_code.total_count.unwrap_or(0)).max(0);
-            active_device.remaining = Set(Some(revoked_remaining));
-        }
+    get_by_id_impl(state, updated_reg_code.id).await
+}
+
+pub(crate) async fn revoke_reg_code_for_order(
+    tx: &DatabaseTransaction,
+    id: i32,
+) -> Result<(), AppError> {
+    let reg_code = reg_codes::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
+
+    if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Refunded {
+        return Ok(());
     }
-    active_device.updated_at = Set(now);
-    active_device.update(&tx).await?;
+    apply_reg_code_revocation(tx, reg_code).await?;
+    Ok(())
+}
+
+async fn apply_reg_code_revocation(
+    tx: &DatabaseTransaction,
+    reg_code: reg_codes::Model,
+) -> Result<reg_codes::Model, AppError> {
+    let now = Utc::now().fixed_offset();
+    if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded {
+        let device_id = reg_code.device_id.ok_or_else(|| {
+            AppError::business_logic(
+                "REG_CODE_DEVICE_NOT_FOUND",
+                "reg code is not bound to a device",
+            )
+        })?;
+        let device = app_devices::Entity::find_by_id(device_id)
+            .lock_exclusive()
+            .one(tx)
+            .await?
+            .ok_or_else(|| AppError::not_found("app_devices".to_string(), Some(device_id)))?;
+
+        let current_expire_time = device.expire_time;
+        let current_remaining = device.remaining;
+        let mut active_device = device.into_active_model();
+        match CodeType::from(reg_code.code_type) {
+            CodeType::Time => {
+                let expire_time = current_expire_time.unwrap_or(now);
+                let revoked_expire_time =
+                    expire_time - chrono::Duration::days(reg_code.valid_days as i64);
+                active_device.expire_time = Set(Some(revoked_expire_time));
+            }
+            CodeType::Count => {
+                let revoked_remaining =
+                    (current_remaining.unwrap_or(0) - reg_code.total_count.unwrap_or(0)).max(0);
+                active_device.remaining = Set(Some(revoked_remaining));
+            }
+        }
+        active_device.updated_at = Set(now);
+        active_device.update(tx).await?;
+    }
 
     let mut active_reg_code = reg_code.into_active_model();
     active_reg_code.status = Set(i16::from(RegCodeStatus::Refunded));
     active_reg_code.device_id = Set(None);
     active_reg_code.updated_at = Set(now);
-    let updated_reg_code = active_reg_code.update(&tx).await?;
-    tx.commit().await?;
-
-    get_by_id_impl(state, updated_reg_code.id).await
+    Ok(active_reg_code.update(tx).await?)
 }
 
 // Delete RegCode

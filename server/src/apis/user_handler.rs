@@ -13,6 +13,7 @@ use sea_orm::{
     QueryOrder, Set,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use validator::Validate;
 
 #[derive(Deserialize, Debug, Validate)]
@@ -27,6 +28,15 @@ pub struct UserUpdatePayload {
     pub username: Option<String>,
     pub password: Option<String>,
     pub role_ids: Option<Vec<i32>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_rate")]
+    pub commission_rate_bps: Option<Option<i32>>,
+}
+
+fn deserialize_nullable_rate<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<i32>::deserialize(deserializer)?))
 }
 
 #[derive(Serialize)]
@@ -60,6 +70,7 @@ pub async fn add_impl(state: &AppState, req: UserCreatePayload) -> Result<UserWi
     let active_model = users::ActiveModel {
         username: Set(req.username),
         password: Set(password),
+        referral_code: Set(new_referral_code()),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -114,6 +125,16 @@ pub async fn update_impl(
         let hashed_password = bcrypt::hash(password, 10)?;
         user.password = Set(hashed_password);
     }
+    if let Some(rate) = req.commission_rate_bps {
+        if let Some(rate) = rate {
+            if !(0..=10000).contains(&rate) {
+                return Err(AppError::validation(
+                    "commission_rate_bps must be between 0 and 10000",
+                ));
+            }
+        }
+        user.commission_rate_bps = Set(rate);
+    }
     user.updated_at = Set(Utc::now().fixed_offset());
     let user = user.update(&state.db).await?;
 
@@ -141,6 +162,37 @@ pub async fn update_impl(
             .collect();
         Ok(UserWithRoles { user, role_ids })
     }
+}
+
+pub fn new_referral_code() -> String {
+    format!(
+        "LH{}",
+        Uuid::new_v4().simple().to_string()[..10].to_ascii_uppercase()
+    )
+}
+
+#[handler]
+pub async fn reset_referral_code(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+) -> Result<ApiResponse<UserWithRoles>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let user = users::Entity::find_by_id(id.into_inner())
+        .one(&state.db)
+        .await?;
+    let user = user.ok_or_else(|| AppError::not_found("users", None))?;
+    let mut active = user.into_active_model();
+    active.referral_code = Set(new_referral_code());
+    active.updated_at = Set(Utc::now().fixed_offset());
+    let user = active.update(&state.db).await?;
+    let role_ids = user_roles::Entity::find()
+        .filter(user_roles::Column::UserId.eq(user.id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|m| m.role_id)
+        .collect();
+    Ok(ApiResponse::success(UserWithRoles { user, role_ids }))
 }
 
 // Delete User

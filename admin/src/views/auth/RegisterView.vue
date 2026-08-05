@@ -54,10 +54,10 @@ const handleRegister = async () => {
   }
   try {
     await authStore.register({ username: username.value, password: password.value })
-    router.push(RoutePath.AdminDashboard)
+    router.push(RoutePath.UserHome)
   } catch (error) {
     ElMessage.error(t('auth.register_failed'))
     console.error(error)
   }
 }
-</script> 
+</script>

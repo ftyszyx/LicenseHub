@@ -17,8 +17,7 @@
 import AppMenu from "./AppMenu.vue";
 import type { AdminMenuItem } from "@/types/menu";
 import { RoutePath } from "@/types/route";
-
-const menuItems: AdminMenuItem[] = [
+const baseMenuItems: AdminMenuItem[] = [
   //i18n-key: menu.dashboard
   {
     label: "menu.group_overview",
@@ -37,6 +36,7 @@ const menuItems: AdminMenuItem[] = [
       { label: "menu.products", icon: "Goods", path: RoutePath.AdminProducts },
       //i18n-key: menu.orders
       { label: "menu.orders", icon: "ShoppingCart", path: RoutePath.AdminOrders },
+      { label: "佣金与提现", icon: "Money", path: RoutePath.AdminDistribution },
     ],
   },
   {
@@ -74,6 +74,8 @@ const menuItems: AdminMenuItem[] = [
     ],
   },
 ];
+
+const menuItems = baseMenuItems;
 
 const defaultOpeneds = ["overview", "business", "license", "system"];
 </script>

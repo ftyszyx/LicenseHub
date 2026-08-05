@@ -65,7 +65,7 @@ docker-compose -f docker-compose.test.yml up -d
 
 ```
 cd server
-sqlx migrate run --database-url postgres://test:123456@localhost:5432/hub
+sqlx migrate run --database-url postgres://test:123456@localhost:15432/hub
 ```
 ```
 

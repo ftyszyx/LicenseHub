@@ -19,3 +19,7 @@ export async function updateUser(id: number, payload: UpdateUserReq): Promise<Us
 export async function deleteUser(id: number): Promise<void> {
   return (await request.delete(`/admin/users/${id}`)).data
 }
+
+export async function resetReferralCode(id: number): Promise<UserWithRoles> {
+  return (await request.post(`/admin/users/${id}/referral-code/reset`)).data
+}

@@ -20,6 +20,31 @@ pub fn create_router(app_state: AppState) -> Service {
         .push(Router::with_path("me").get(apis::auth::get_current_user))
         .push(Router::with_path("me/permissions").get(apis::auth::get_my_permissions))
         .push(
+            Router::with_path("me/distribution/summary")
+                .get(apis::distribution_handler::my_summary),
+        )
+        .push(
+            Router::with_path("me/distribution/commissions")
+                .get(apis::distribution_handler::my_commissions),
+        )
+        .push(
+            Router::with_path("me/distribution/settlements")
+                .get(apis::distribution_handler::my_settlements)
+                .post(apis::distribution_handler::create_settlement),
+        )
+        .push(
+            Router::with_path("me/distribution/withdraw")
+                .post(apis::distribution_handler::create_settlement),
+        )
+        .push(
+            Router::with_path("me/distribution/adjustments")
+                .get(apis::distribution_handler::my_adjustments),
+        )
+        .push(
+            Router::with_path("me/distribution/settlements/{id}/proof")
+                .get(apis::distribution_handler::my_settlement_proof),
+        )
+        .push(
             Router::with_path("dashboard")
                 .hoop(RequirePerm::new("dashboard", "READ"))
                 .get(apis::dashboard_handler::get_dashboard_stats),
@@ -70,6 +95,11 @@ pub fn create_router(app_state: AppState) -> Service {
             Router::with_path("users/{id}")
                 .hoop(RequirePerm::new("users", "DELETE"))
                 .delete(apis::user_handler::delete),
+        )
+        .push(
+            Router::with_path("users/{id}/referral-code/reset")
+                .hoop(RequirePerm::new("users", "UPDATE"))
+                .post(apis::user_handler::reset_referral_code),
         )
         //apps
         .push(
@@ -148,6 +178,41 @@ pub fn create_router(app_state: AppState) -> Service {
             Router::with_path("orders/list")
                 .hoop(RequirePerm::new("orders", "READ"))
                 .get(apis::payment_handler::list_orders),
+        )
+        .push(
+            Router::with_path("orders/{id}/refund")
+                .hoop(RequirePerm::new("orders", "UPDATE"))
+                .post(apis::payment_handler::confirm_order_refund),
+        )
+        .push(
+            Router::with_path("distribution/commissions")
+                .hoop(RequirePerm::new("distribution", "READ"))
+                .get(apis::distribution_handler::admin_commissions),
+        )
+        .push(
+            Router::with_path("distribution/settlements")
+                .hoop(RequirePerm::new("distribution", "READ"))
+                .get(apis::distribution_handler::admin_settlements),
+        )
+        .push(
+            Router::with_path("distribution/settlements/{id}/reject")
+                .hoop(RequirePerm::new("distribution", "UPDATE"))
+                .post(apis::distribution_handler::reject_settlement),
+        )
+        .push(
+            Router::with_path("distribution/settlements/{id}/paid")
+                .hoop(RequirePerm::new("distribution", "UPDATE"))
+                .post(apis::distribution_handler::mark_settlement_paid),
+        )
+        .push(
+            Router::with_path("distribution/settlements/{id}/proof")
+                .hoop(RequirePerm::new("distribution", "UPDATE"))
+                .get(apis::distribution_handler::settlement_proof),
+        )
+        .push(
+            Router::with_path("distribution/adjustments")
+                .hoop(RequirePerm::new("distribution", "READ"))
+                .get(apis::distribution_handler::admin_adjustments),
         )
         .push(
             Router::with_path("payment-channels")

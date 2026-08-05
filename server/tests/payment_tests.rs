@@ -6,6 +6,119 @@ use serde_json::json;
 
 mod helpers;
 
+async fn enable_distribution(pool: &sqlx::PgPool, holding_days: i32, min_withdraw_cents: i32) {
+    for (key, value) in [
+        ("distribution_enabled", "true".to_string()),
+        ("distribution_holding_days", holding_days.to_string()),
+        (
+            "distribution_min_withdraw_cents",
+            min_withdraw_cents.to_string(),
+        ),
+    ] {
+        sqlx::query("update system_settings set value = $2, updated_at = now() where key = $1")
+            .bind(key)
+            .bind(value)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+}
+
+fn payment_proof_multipart(
+    boundary: &str,
+    payment_reference: &str,
+    file_name: &str,
+    content_type: &str,
+    content: &[u8],
+) -> Vec<u8> {
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"payment_reference\"\r\n\r\n{payment_reference}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"proof\"; filename=\"{file_name}\"\r\nContent-Type: {content_type}\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(content);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    body
+}
+
+async fn create_delivered_referral_order(
+    ctx: &helpers::TestContext,
+    pool: &sqlx::PgPool,
+    price_cents: i32,
+    label: &str,
+) -> (i32, String) {
+    let referral_code: String = sqlx::query_scalar("select referral_code from users where id = 1")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "name": helpers::unique_name(&format!("{label}App")),
+            "app_id": helpers::unique_name(&format!("com.{label}.app")),
+            "app_vername": "1.0.0",
+            "app_vercode": 1,
+            "app_download_url": "https://example.com/dl",
+            "app_res_url": "https://example.com/res",
+            "app_update_info": "",
+            "app_valid_key": helpers::unique_name(&format!("{label}KEY")),
+            "trial_days": 0,
+            "sort_order": 0,
+            "status": 1
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_settlement_test_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/plans"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "app_id": app_id,
+            "name": format!("{label} plan"),
+            "description": null,
+            "price_cents": price_cents,
+            "code_type": 0,
+            "valid_days": 30,
+            "total_count": null,
+            "status": 1,
+            "sort_order": 0
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_settlement_test_plan").await;
+    let plan_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let resp = TestClient::post(helpers::get_url("/api/orders"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "plan_id": plan_id,
+            "pay_type": "wechat_native",
+            "referral_code": referral_code
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_settlement_test_order").await;
+    let order_id = json["data"]["id"].as_i64().unwrap() as i32;
+    let order_no = json["data"]["order_no"].as_str().unwrap().to_string();
+    process_payment_notification(
+        &ctx.app_state,
+        PaymentNotification {
+            provider: "wechat".to_string(),
+            pay_type: "wechat_native".to_string(),
+            out_trade_no: order_no.clone(),
+            provider_trade_no: Some(helpers::unique_name("WX-SETTLEMENT")),
+            amount_cents: price_cents,
+            status: PaymentStatus::Success,
+            raw_payload: json!({"source": "settlement-test"}),
+        },
+    )
+    .await
+    .unwrap();
+    (order_id, order_no)
+}
+
 #[tokio::test]
 async fn test_create_order_and_payment_notification_delivers_reg_code() {
     let _lock = helpers::db_lock().await;
@@ -121,6 +234,382 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
         .collect();
     assert_eq!(matching.len(), 1);
     assert!(matching[0]["reg_code"].as_str().unwrap().starts_with("LH-"));
+}
+
+#[tokio::test]
+async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    sqlx::query(
+        "update system_settings set value = 'true', updated_at = now() where key = 'distribution_enabled'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let referral_code: String = sqlx::query_scalar("select referral_code from users where id = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "name": helpers::unique_name("RefundApp"),
+            "app_id": helpers::unique_name("com.refund.app"),
+            "app_vername": "1.0.0",
+            "app_vercode": 1,
+            "app_download_url": "https://example.com/dl",
+            "app_res_url": "https://example.com/res",
+            "app_update_info": "",
+            "app_valid_key": helpers::unique_name("REFUNDKEY"),
+            "trial_days": 0,
+            "sort_order": 0,
+            "status": 1
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_refund_app").await;
+    let app_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/plans"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "app_id": app_id,
+            "name": "refund plan",
+            "description": null,
+            "price_cents": 5000,
+            "code_type": 0,
+            "valid_days": 30,
+            "total_count": null,
+            "status": 1,
+            "sort_order": 0
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_refund_plan").await;
+    let plan_id = json["data"]["id"].as_i64().unwrap() as i32;
+
+    let resp = TestClient::post(helpers::get_url("/api/orders"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "plan_id": plan_id,
+            "pay_type": "wechat_native",
+            "referral_code": referral_code
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "create_refund_order").await;
+    let order_id = json["data"]["id"].as_i64().unwrap() as i32;
+    let order_no = json["data"]["order_no"].as_str().unwrap().to_string();
+
+    let notification = PaymentNotification {
+        provider: "wechat".to_string(),
+        pay_type: "wechat_native".to_string(),
+        out_trade_no: order_no.clone(),
+        provider_trade_no: Some(helpers::unique_name("WX-REFUND")),
+        amount_cents: 5000,
+        status: PaymentStatus::Success,
+        raw_payload: json!({"source": "refund-test"}),
+    };
+    process_payment_notification(&ctx.app_state, notification.clone())
+        .await
+        .unwrap();
+
+    let reg_code_id: i32 = sqlx::query_scalar("select reg_code_id from orders where id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{reg_code_id}/revoke"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let revoke_json =
+        helpers::print_response_body_get_json(resp, "reject_paid_order_reg_code_revoke").await;
+    assert!(!revoke_json["success"].as_bool().unwrap());
+    assert!(
+        revoke_json["message"]
+            .as_str()
+            .unwrap()
+            .contains("ORDER_REFUND_REQUIRED")
+    );
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/orders/{order_id}/refund"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({
+        "refund_reference": "WX-REFUND-TEST-001",
+        "reason": "customer requested refund"
+    }))
+    .send(&ctx.app)
+    .await;
+    let refund_json = helpers::print_response_body_get_json(resp, "confirm_order_refund").await;
+    assert!(refund_json["success"].as_bool().unwrap());
+    assert_eq!(
+        refund_json["data"]["status"].as_i64(),
+        Some(OrderStatus::Refunded as i64)
+    );
+    assert_eq!(
+        refund_json["data"]["refund"]["refund_reference"].as_str(),
+        Some("WX-REFUND-TEST-001")
+    );
+
+    let refund_row: (i32, String, String, i16, i32) = sqlx::query_as(
+        "select amount_cents, refund_reference, reason, status, operator_user_id from order_refunds where order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(refund_row.0, 5000);
+    assert_eq!(refund_row.1, "WX-REFUND-TEST-001");
+    assert_eq!(refund_row.2, "customer requested refund");
+    assert_eq!(refund_row.3, 1);
+    assert_eq!(refund_row.4, 1);
+
+    let commission: (i16, Option<String>) = sqlx::query_as(
+        "select status, cancel_reason from distribution_commissions where order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(commission.0, 4);
+    assert_eq!(commission.1.as_deref(), Some("order_refunded"));
+
+    let reg_code_status: i16 = sqlx::query_scalar("select status from reg_codes where id = $1")
+        .bind(reg_code_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(reg_code_status, 3);
+
+    let refund_event_count: i64 = sqlx::query_scalar(
+        "select count(*) from order_events where order_id = $1 and event_type = 'refund.confirmed'",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(refund_event_count, 1);
+
+    let repeated = process_payment_notification(&ctx.app_state, notification)
+        .await
+        .unwrap();
+    assert_eq!(repeated.status, OrderStatus::Refunded);
+    assert_eq!(repeated.reg_code_id, Some(reg_code_id));
+
+    let final_status: i16 = sqlx::query_scalar("select status from orders where id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(final_status, OrderStatus::Refunded as i16);
+}
+
+#[tokio::test]
+async fn test_refund_rejects_pending_withdrawal_and_releases_locked_commission() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    enable_distribution(&pool, 0, 100).await;
+    let (order_id, _) = create_delivered_referral_order(&ctx, &pool, 10_000, "LockedRefund").await;
+
+    let resp = TestClient::get(helpers::get_url("/api/admin/me/distribution/summary"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    let summary = helpers::print_response_body_get_json(resp, "release_locked_commission").await;
+    assert_eq!(
+        summary["data"]["available_amount_cents"].as_i64(),
+        Some(2000)
+    );
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/me/distribution/settlements"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "amount_cents": 2000,
+            "alipay_account": "locked@example.com",
+            "real_name": "锁定测试"
+        }))
+        .send(&ctx.app)
+        .await;
+    let settlement = helpers::print_response_body_get_json(resp, "create_locked_settlement").await;
+    let settlement_id = settlement["data"]["id"].as_i64().unwrap();
+    assert_eq!(settlement["data"]["status"].as_i64(), Some(0));
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/orders/{order_id}/refund"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({
+        "refund_reference": "LOCKED-REFUND-001",
+        "reason": "refund while withdrawal pending"
+    }))
+    .send(&ctx.app)
+    .await;
+    let refund = helpers::print_response_body_get_json(resp, "refund_locked_commission").await;
+    assert!(refund["success"].as_bool().unwrap());
+
+    let settlement_row: (i16, Option<String>) =
+        sqlx::query_as("select status, reject_reason from distribution_settlements where id = $1")
+            .bind(settlement_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(settlement_row.0, 2);
+    assert!(settlement_row.1.unwrap().contains("订单退款"));
+    let commission: (i16, i32, i32) = sqlx::query_as(
+        "select status, locked_amount_cents, cancelled_amount_cents from distribution_commissions where order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(commission, (4, 0, 2000));
+}
+
+#[tokio::test]
+async fn test_settled_refund_creates_debt_and_future_commission_offsets_it() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    enable_distribution(&pool, 0, 100).await;
+    let (first_order_id, _) =
+        create_delivered_referral_order(&ctx, &pool, 50_000, "SettledRefund").await;
+
+    let resp = TestClient::get(helpers::get_url("/api/admin/me/distribution/summary"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    let summary = helpers::print_response_body_get_json(resp, "release_settled_commission").await;
+    assert_eq!(
+        summary["data"]["available_amount_cents"].as_i64(),
+        Some(10_000)
+    );
+
+    let resp = TestClient::post(helpers::get_url("/api/admin/me/distribution/settlements"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "amount_cents": 6000,
+            "alipay_account": "paid@example.com",
+            "real_name": "结算测试"
+        }))
+        .send(&ctx.app)
+        .await;
+    let settlement = helpers::print_response_body_get_json(resp, "create_paid_settlement").await;
+    let settlement_id = settlement["data"]["id"].as_i64().unwrap();
+    let boundary = "licensehub-payment-proof";
+    let proof_content = [137, 80, 78, 71, 1, 2, 3];
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/distribution/settlements/{settlement_id}/paid"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header(
+        "content-type",
+        format!("multipart/form-data; boundary={boundary}"),
+        true,
+    )
+    .body(payment_proof_multipart(
+        boundary,
+        "ALIPAY-OFFLINE-001",
+        "proof.png",
+        "image/png",
+        &proof_content,
+    ))
+    .send(&ctx.app)
+    .await;
+    let paid = helpers::print_response_body_get_json(resp, "mark_settlement_paid").await;
+    assert!(paid["success"].as_bool().unwrap());
+    assert_eq!(paid["data"]["status"].as_i64(), Some(1));
+    assert_eq!(
+        paid["data"]["payment_reference"].as_str(),
+        Some("ALIPAY-OFFLINE-001")
+    );
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/orders/{first_order_id}/refund"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({
+        "refund_reference": "SETTLED-REFUND-001",
+        "reason": "refund after offline payment"
+    }))
+    .send(&ctx.app)
+    .await;
+    let refund = helpers::print_response_body_get_json(resp, "refund_settled_commission").await;
+    assert!(refund["success"].as_bool().unwrap());
+
+    let first_commission: (i16, i32, i32) = sqlx::query_as(
+        "select status, settled_amount_cents, cancelled_amount_cents from distribution_commissions where order_id = $1",
+    )
+    .bind(first_order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(first_commission, (3, 6000, 4000));
+    let adjustment: (i32, i32, i16) = sqlx::query_as(
+        "select amount_cents, offset_amount_cents, status from distribution_commission_adjustments where order_id = $1",
+    )
+    .bind(first_order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(adjustment, (-6000, 0, 0));
+
+    let (second_order_id, _) =
+        create_delivered_referral_order(&ctx, &pool, 50_000, "DebtOffset").await;
+    let resp = TestClient::get(helpers::get_url("/api/admin/me/distribution/summary"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    let summary = helpers::print_response_body_get_json(resp, "offset_refund_debt").await;
+    assert_eq!(summary["data"]["adjustment_debt_cents"].as_i64(), Some(0));
+    assert_eq!(
+        summary["data"]["available_amount_cents"].as_i64(),
+        Some(4000)
+    );
+
+    let second_commission: (i16, i32) = sqlx::query_as(
+        "select status, adjustment_amount_cents from distribution_commissions where order_id = $1",
+    )
+    .bind(second_order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(second_commission, (1, 6000));
+    let adjustment: (i32, i16) = sqlx::query_as(
+        "select offset_amount_cents, status from distribution_commission_adjustments where order_id = $1",
+    )
+    .bind(first_order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(adjustment, (6000, 2));
+    let proof_size: i32 = sqlx::query_scalar(
+        "select octet_length(content) from distribution_settlement_proofs where settlement_id = $1",
+    )
+    .bind(settlement_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(proof_size, 7);
 }
 
 #[tokio::test]

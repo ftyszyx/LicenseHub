@@ -1,8 +1,15 @@
 pub mod app_devices;
 pub mod app_version_sync_logs;
 pub mod apps;
+pub mod distribution_commission_adjustment_offsets;
+pub mod distribution_commission_adjustments;
+pub mod distribution_commissions;
+pub mod distribution_settlement_items;
+pub mod distribution_settlement_proofs;
+pub mod distribution_settlements;
 pub mod license_plans;
 pub mod order_events;
+pub mod order_refunds;
 pub mod orders;
 pub mod payment_channels;
 pub mod permissions;

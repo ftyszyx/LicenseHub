@@ -9,7 +9,9 @@ const authStore = useAuthStore()
 const storefrontTitle = ref('LicenseHub')
 
 const adminRoute = computed(() => (
-  authStore.isAuthenticated ? RoutePath.AdminDashboard : RoutePath.Login
+  authStore.isAuthenticated
+    ? (authStore.isAdmin ? RoutePath.AdminDashboard : RoutePath.UserHome)
+    : RoutePath.Login
 ))
 
 async function loadSiteSettings() {

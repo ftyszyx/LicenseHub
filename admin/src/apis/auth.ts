@@ -1,5 +1,5 @@
 import request from "@/utils/request"
-import type { ApiResponse, AuthPayload, AuthResponse, RegisterPayload } from "@/types"
+import type { ApiResponse, AuthPayload, AuthResponse, RegisterPayload, UserModel } from "@/types"
 import type { ChangePasswordPayload } from "@/types"
 
 
@@ -15,7 +15,7 @@ export const sentRegister = async (payload: RegisterPayload) => {
 
 
 export const sentGetUserInfo = async () => {
-    const response = await request.get('/admin/me') as ApiResponse<any>
+    const response = await request.get('/admin/me') as ApiResponse<UserModel>
     return response.data
 }
 

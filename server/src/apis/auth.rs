@@ -55,6 +55,7 @@ pub async fn register(
     let new_user = users::ActiveModel {
         username: Set(json.username.clone()),
         password: Set(password),
+        referral_code: Set(crate::apis::user_handler::new_referral_code()),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()

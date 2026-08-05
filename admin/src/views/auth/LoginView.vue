@@ -79,10 +79,10 @@ const togglePasswordVisibility = () => {
 
 const handleLogin = async () => {
     await authStore.login({username: username.value, password: password.value})
-    router.push(RoutePath.AdminDashboard)
+    router.push(authStore.isAdmin ? RoutePath.AdminDashboard : RoutePath.UserHome)
 }
 
 onMounted(() => {
   // generateCaptcha() // Removed captcha logic
 })
-</script> 
+</script>

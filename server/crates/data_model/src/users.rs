@@ -11,14 +11,61 @@ pub struct Model {
     #[sea_orm(unique)]
     pub username: String,
     pub password: String,
+    #[sea_orm(unique)]
+    pub referral_code: String,
+    pub commission_rate_bps: Option<i32>,
+    #[serde(skip_serializing)]
+    pub settlement_account: Option<Json>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::distribution_commission_adjustments::Entity")]
+    DistributionCommissionAdjustments,
+    #[sea_orm(has_many = "super::distribution_commissions::Entity")]
+    DistributionCommissions,
+    #[sea_orm(has_many = "super::distribution_settlement_proofs::Entity")]
+    DistributionSettlementProofs,
+    #[sea_orm(has_many = "super::distribution_settlements::Entity")]
+    DistributionSettlements,
+    #[sea_orm(has_many = "super::order_refunds::Entity")]
+    OrderRefunds,
+    #[sea_orm(has_many = "super::orders::Entity")]
+    Orders,
     #[sea_orm(has_many = "super::user_roles::Entity")]
     UserRoles,
+}
+
+impl Related<super::distribution_commission_adjustments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::DistributionCommissionAdjustments.def()
+    }
+}
+
+impl Related<super::distribution_commissions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::DistributionCommissions.def()
+    }
+}
+
+impl Related<super::distribution_settlement_proofs::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::DistributionSettlementProofs.def()
+    }
+}
+
+impl Related<super::distribution_settlements::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::DistributionSettlements.def()
+    }
+}
+
+impl Related<super::order_refunds::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::OrderRefunds.def()
+    }
 }
 
 impl Related<super::user_roles::Entity> for Entity {

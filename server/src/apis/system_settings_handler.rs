@@ -12,11 +12,26 @@ use serde::{Deserialize, Serialize};
 const STOREFRONT_TITLE_KEY: &str = "storefront_title";
 pub const LICENSE_SIGNING_PRIVATE_KEY_KEY: &str = "license_signing_private_key_b64";
 const DEFAULT_STOREFRONT_TITLE: &str = "LicenseHub";
+pub const DISTRIBUTION_ENABLED_KEY: &str = "distribution_enabled";
+pub const DISTRIBUTION_DEFAULT_RATE_BPS_KEY: &str = "distribution_default_rate_bps";
+pub const DISTRIBUTION_ATTRIBUTION_DAYS_KEY: &str = "distribution_attribution_days";
+pub const DISTRIBUTION_HOLDING_DAYS_KEY: &str = "distribution_holding_days";
+pub const DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY: &str = "distribution_min_withdraw_cents";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiteSettingsInfo {
     pub storefront_title: String,
+    pub distribution: DistributionSettingsInfo,
     pub license_signing: LicenseSigningInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DistributionSettingsInfo {
+    pub enabled: bool,
+    pub default_rate_bps: i32,
+    pub attribution_days: i32,
+    pub holding_days: i32,
+    pub min_withdraw_cents: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +49,11 @@ pub struct LicenseSigningInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateSystemSettingsReq {
     pub storefront_title: String,
+    pub distribution_enabled: Option<bool>,
+    pub distribution_default_rate_bps: Option<i32>,
+    pub distribution_attribution_days: Option<i32>,
+    pub distribution_holding_days: Option<i32>,
+    pub distribution_min_withdraw_cents: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -100,6 +120,7 @@ pub async fn get_site_settings_impl(
         storefront_title: get_setting_value(state, STOREFRONT_TITLE_KEY)
             .await?
             .unwrap_or_else(|| DEFAULT_STOREFRONT_TITLE.to_string()),
+        distribution: get_distribution_settings(state).await?,
         license_signing: get_license_signing_info(state, include_private_key).await?,
     })
 }
@@ -110,7 +131,57 @@ pub async fn update_system_settings_impl(
 ) -> Result<SiteSettingsInfo, AppError> {
     let storefront_title = normalize_storefront_title(req.storefront_title)?;
     upsert_setting(state, STOREFRONT_TITLE_KEY, storefront_title).await?;
+    if let Some(value) = req.distribution_enabled {
+        upsert_setting(state, DISTRIBUTION_ENABLED_KEY, value.to_string()).await?;
+    }
+    if let Some(value) = req.distribution_default_rate_bps {
+        validate_range("distribution_default_rate_bps", value, 0, 10000)?;
+        upsert_setting(state, DISTRIBUTION_DEFAULT_RATE_BPS_KEY, value.to_string()).await?;
+    }
+    if let Some(value) = req.distribution_attribution_days {
+        validate_range("distribution_attribution_days", value, 1, 3650)?;
+        upsert_setting(state, DISTRIBUTION_ATTRIBUTION_DAYS_KEY, value.to_string()).await?;
+    }
+    if let Some(value) = req.distribution_holding_days {
+        validate_range("distribution_holding_days", value, 0, 3650)?;
+        upsert_setting(state, DISTRIBUTION_HOLDING_DAYS_KEY, value.to_string()).await?;
+    }
+    if let Some(value) = req.distribution_min_withdraw_cents {
+        validate_range("distribution_min_withdraw_cents", value, 0, i32::MAX)?;
+        upsert_setting(
+            state,
+            DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY,
+            value.to_string(),
+        )
+        .await?;
+    }
     get_site_settings_impl(state, true).await
+}
+
+pub async fn get_distribution_settings(
+    state: &AppState,
+) -> Result<DistributionSettingsInfo, AppError> {
+    Ok(DistributionSettingsInfo {
+        enabled: setting_bool(state, DISTRIBUTION_ENABLED_KEY, false).await?,
+        default_rate_bps: setting_i32(state, DISTRIBUTION_DEFAULT_RATE_BPS_KEY, 2000).await?,
+        attribution_days: setting_i32(state, DISTRIBUTION_ATTRIBUTION_DAYS_KEY, 30).await?,
+        holding_days: setting_i32(state, DISTRIBUTION_HOLDING_DAYS_KEY, 7).await?,
+        min_withdraw_cents: setting_i32(state, DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY, 5000).await?,
+    })
+}
+
+async fn setting_bool(state: &AppState, key: &str, default: bool) -> Result<bool, AppError> {
+    Ok(get_setting_value(state, key)
+        .await?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default))
+}
+
+async fn setting_i32(state: &AppState, key: &str, default: i32) -> Result<i32, AppError> {
+    Ok(get_setting_value(state, key)
+        .await?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default))
 }
 
 pub async fn get_license_signing_private_key_b64(
@@ -210,4 +281,14 @@ fn normalize_storefront_title(value: String) -> Result<String, AppError> {
         ));
     }
     Ok(value)
+}
+
+fn validate_range(name: &str, value: i32, min: i32, max: i32) -> Result<(), AppError> {
+    if value < min || value > max {
+        return Err(AppError::validation(format!(
+            "{} must be between {} and {}",
+            name, min, max
+        )));
+    }
+    Ok(())
 }

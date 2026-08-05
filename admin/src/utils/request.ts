@@ -8,9 +8,38 @@ const instance = axios.create({
   baseURL: import.meta.env.VITE_BASE_URL || '/api',
 })
 
+type UiRequestConfig = InternalAxiosRequestConfig & {
+  suppressErrorMessage?: boolean
+}
+
+const sensitiveKeys = new Set([
+  'password',
+  'old_password',
+  'new_password',
+  'alipay_account',
+  'real_name',
+  'settlement_account',
+])
+
+function sanitizeForLog(value: unknown): unknown {
+  if (value instanceof FormData) return '[FormData omitted]'
+  if (Array.isArray(value)) return value.map(sanitizeForLog)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      key,
+      sensitiveKeys.has(key) ? '[REDACTED]' : sanitizeForLog(item),
+    ]))
+  }
+  return value
+}
+
+function shouldSuppressErrorMessage(config?: InternalAxiosRequestConfig) {
+  return Boolean((config as UiRequestConfig | undefined)?.suppressErrorMessage)
+}
+
 instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    consoleLog(`[request] ${config.method} ${config.baseURL}${config.url} \nData: ${JSON.stringify(config.data)} \nParams: ${JSON.stringify(config.params)}`)
+    consoleLog(`[request] ${config.method} ${config.baseURL}${config.url} \nData: ${JSON.stringify(sanitizeForLog(config.data))} \nParams: ${JSON.stringify(config.params)}`)
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -26,13 +55,16 @@ instance.interceptors.request.use(
 
 instance.interceptors.response.use(
   (response: AxiosResponse) => {
-    consoleLog(`[response] ${response.config.method} ${response.config.baseURL}${response.config.url} \nData: ${JSON.stringify(response.data)}`)
+    if (response.config.responseType === 'blob') return response.data
+    consoleLog(`[response] ${response.config.method} ${response.config.baseURL}${response.config.url} \nData: ${JSON.stringify(sanitizeForLog(response.data))}`)
     const data = response.data
     if (data.success) {
       return data
     } else {
       const message = data.message
-      ElMessage.error(message)
+      if (!shouldSuppressErrorMessage(response.config)) {
+        ElMessage.error(message)
+      }
       consoleError(message)
       return Promise.reject(message)
     }
@@ -47,9 +79,11 @@ instance.interceptors.response.use(
       return Promise.reject(error)
     }
     consoleError(`[error] ${error.config?.method} ${error.config?.baseURL}${error.config?.url} status: ${error.response?.status}`)
-    ElMessage.error(`${error.code}:${error.message}`)
+    if (!shouldSuppressErrorMessage(error.config)) {
+      ElMessage.error(`${error.code}:${error.message}`)
+    }
     return Promise.reject(error)
   }
 )
 
-export default instance 
+export default instance

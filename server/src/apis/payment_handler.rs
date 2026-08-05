@@ -1,10 +1,16 @@
+use crate::apis::auth_middleware::Claims;
+use crate::apis::distribution_handler::{handle_commission_refund, new_commission_active_model};
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
-use crate::apis::reg_codes_handler::{CodeType, RegCodeStatus};
+use crate::apis::reg_codes_handler::{CodeType, RegCodeStatus, revoke_reg_code_for_order};
+use crate::apis::system_settings_handler::get_distribution_settings;
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
 use chrono::Utc;
-use data_model::{apps, license_plans, order_events, orders, payment_channels, reg_codes};
+use data_model::{
+    apps, distribution_commissions, license_plans, order_events, order_refunds, orders,
+    payment_channels, reg_codes, users,
+};
 use payment_adapter::{
     AlipayPageAdapter, AlipayPageConfig, CreatePaymentRequest, PaymentAdapter, PaymentError,
     PaymentHeaders, PaymentNotification, PaymentStatus, WechatNativeAdapter, WechatNativeConfig,
@@ -29,8 +35,10 @@ const PAY_TYPE_ALIPAY: &str = "alipay";
 const DEFAULT_WECHAT_API_BASE_URL: &str = "https://api.mch.weixin.qq.com";
 const DEFAULT_ALIPAY_GATEWAY_URL: &str = "https://openapi.alipay.com/gateway.do";
 const ORDER_EVENT_PAYMENT_DELIVERED: &str = "payment.delivered";
+const ORDER_EVENT_REFUND_CONFIRMED: &str = "refund.confirmed";
 const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
 const APP_STATUS_ENABLED: i16 = 1;
+const REFUND_STATUS_SUCCEEDED: i16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i16)]
@@ -108,6 +116,7 @@ pub enum OrderStatus {
     Delivered = 2,
     Failed = 3,
     Closed = 4,
+    Refunded = 5,
 }
 
 impl From<i16> for OrderStatus {
@@ -117,6 +126,7 @@ impl From<i16> for OrderStatus {
             2 => OrderStatus::Delivered,
             3 => OrderStatus::Failed,
             4 => OrderStatus::Closed,
+            5 => OrderStatus::Refunded,
             _ => OrderStatus::Pending,
         }
     }
@@ -289,6 +299,7 @@ impl TryFrom<payment_channels::Model> for PaymentChannelInfo {
 pub struct CreateOrderReq {
     pub plan_id: i32,
     pub pay_type: String,
+    pub referral_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -299,6 +310,23 @@ pub struct ListOrdersParams {
     pub status: Option<i16>,
     pub plan_id: Option<i32>,
     pub app_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct ConfirmOrderRefundReq {
+    #[validate(length(min = 1, max = 255))]
+    pub refund_reference: String,
+    #[validate(length(min = 1, max = 1000))]
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderRefundInfo {
+    pub refund_no: String,
+    pub refund_reference: String,
+    pub reason: String,
+    pub operator_user_id: i32,
+    pub refunded_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
 #[derive(Debug, Serialize)]
@@ -319,6 +347,11 @@ pub struct OrderInfo {
     pub url_scheme: Option<String>,
     pub reg_code_id: Option<i32>,
     pub reg_code: Option<String>,
+    pub referrer_user_id: Option<i32>,
+    pub referral_code: Option<String>,
+    pub commission_rate_bps: Option<i32>,
+    pub commission_amount_cents: Option<i32>,
+    pub refund: Option<OrderRefundInfo>,
     pub paid_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
     pub updated_at: chrono::DateTime<chrono::FixedOffset>,
@@ -397,6 +430,11 @@ impl
             url_scheme: order.url_scheme,
             reg_code_id: order.reg_code_id,
             reg_code: None,
+            referrer_user_id: order.referrer_user_id,
+            referral_code: order.referral_code,
+            commission_rate_bps: order.commission_rate_bps,
+            commission_amount_cents: order.commission_amount_cents,
+            refund: None,
             paid_at: order.paid_at,
             created_at: order.created_at,
             updated_at: order.updated_at,
@@ -893,6 +931,31 @@ pub async fn create_order_impl(
 
     let now = Utc::now().fixed_offset();
     let order_no = new_order_no();
+    let distribution = get_distribution_settings(state).await?;
+    let attribution = if distribution.enabled {
+        if let Some(code) = req
+            .referral_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            users::Entity::find()
+                .filter(users::Column::ReferralCode.eq(code.to_ascii_uppercase()))
+                .one(&state.db)
+                .await?
+                .map(|user| {
+                    let rate = user
+                        .commission_rate_bps
+                        .unwrap_or(distribution.default_rate_bps);
+                    let amount = ((plan.price_cents as i64 * rate as i64) / 10000) as i32;
+                    (user.id, user.referral_code, rate, amount)
+                })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let mut active = orders::ActiveModel {
         order_no: Set(order_no.clone()),
         plan_id: Set(plan.id),
@@ -906,6 +969,12 @@ pub async fn create_order_impl(
         updated_at: Set(now),
         ..Default::default()
     };
+    if let Some((user_id, code, rate, amount)) = attribution {
+        active.referrer_user_id = Set(Some(user_id));
+        active.referral_code = Set(Some(code));
+        active.commission_rate_bps = Set(Some(rate));
+        active.commission_amount_cents = Set(Some(amount));
+    }
 
     if state.config.payment.enabled {
         let channel = channel
@@ -998,6 +1067,114 @@ pub async fn list_orders(
     Ok(ApiResponse::success(PagingResponse { list, total, page }))
 }
 
+#[handler]
+pub async fn confirm_order_refund(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+    req: JsonBody<ConfirmOrderRefundReq>,
+) -> Result<ApiResponse<OrderInfo>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let claims = depot.obtain::<Claims>().unwrap();
+    let req = req.into_inner();
+    req.validate()?;
+    Ok(ApiResponse::success(
+        confirm_order_refund_impl(state, claims.user_id, id.into_inner(), req).await?,
+    ))
+}
+
+pub async fn confirm_order_refund_impl(
+    state: &AppState,
+    operator_user_id: i32,
+    order_id: i32,
+    req: ConfirmOrderRefundReq,
+) -> Result<OrderInfo, AppError> {
+    let refund_reference = req.refund_reference.trim().to_string();
+    let reason = req.reason.trim().to_string();
+    if refund_reference.is_empty() || reason.is_empty() {
+        return Err(AppError::validation(
+            "refund_reference and reason must not be empty",
+        ));
+    }
+
+    let tx = state.db.begin().await?;
+    let order = orders::Entity::find_by_id(order_id)
+        .lock_exclusive()
+        .one(&tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("orders", Some(order_id)))?;
+
+    match OrderStatus::from(order.status) {
+        OrderStatus::Refunded => {
+            tx.commit().await?;
+            return get_order_by_no_impl(state, &order.order_no).await;
+        }
+        OrderStatus::Delivered => {}
+        _ => {
+            return Err(AppError::business_logic(
+                "ORDER_REFUND_FORBIDDEN",
+                "only delivered orders can be confirmed as refunded",
+            ));
+        }
+    }
+
+    if let Some(commission) = distribution_commissions::Entity::find()
+        .filter(distribution_commissions::Column::OrderId.eq(order.id))
+        .lock_exclusive()
+        .one(&tx)
+        .await?
+    {
+        handle_commission_refund(&tx, commission, operator_user_id).await?;
+    }
+
+    if let Some(reg_code_id) = order.reg_code_id {
+        revoke_reg_code_for_order(&tx, reg_code_id).await?;
+    }
+
+    let now = Utc::now().fixed_offset();
+    let refund = order_refunds::ActiveModel {
+        refund_no: Set(format!("RF{}", Uuid::new_v4().simple())),
+        order_id: Set(order.id),
+        amount_cents: Set(order.amount_cents),
+        provider: Set(order.provider.clone()),
+        provider_trade_no: Set(order.provider_trade_no.clone()),
+        refund_reference: Set(refund_reference.clone()),
+        reason: Set(reason.clone()),
+        status: Set(REFUND_STATUS_SUCCEEDED),
+        operator_user_id: Set(operator_user_id),
+        refunded_at: Set(now),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    }
+    .insert(&tx)
+    .await?;
+
+    let mut active = order.into_active_model();
+    active.status = Set(i16::from(OrderStatus::Refunded));
+    active.updated_at = Set(now);
+    let updated_order = active.update(&tx).await?;
+
+    let event = create_order_event(
+        &tx,
+        &updated_order,
+        ORDER_EVENT_REFUND_CONFIRMED,
+        json!({
+            "refund_no": refund.refund_no,
+            "refund_reference": refund_reference,
+            "reason": reason,
+            "amount_cents": refund.amount_cents,
+            "provider": refund.provider,
+            "provider_trade_no": refund.provider_trade_no,
+            "operator_user_id": operator_user_id,
+        }),
+    )
+    .await?;
+    notify_order_event(&tx, event.id).await?;
+    tx.commit().await?;
+
+    get_order_by_no_impl(state, &updated_order.order_no).await
+}
+
 pub async fn get_order_by_no_impl(state: &AppState, order_no: &str) -> Result<OrderInfo, AppError> {
     let row = orders::Entity::find()
         .filter(orders::Column::OrderNo.eq(order_no))
@@ -1075,6 +1252,17 @@ async fn build_order_info(
             .await?
             .map(|r| r.code);
     }
+    info.refund = order_refunds::Entity::find()
+        .filter(order_refunds::Column::OrderId.eq(info.id))
+        .one(&state.db)
+        .await?
+        .map(|refund| OrderRefundInfo {
+            refund_no: refund.refund_no,
+            refund_reference: refund.refund_reference,
+            reason: refund.reason,
+            operator_user_id: refund.operator_user_id,
+            refunded_at: refund.refunded_at,
+        });
     Ok(info)
 }
 
@@ -1223,6 +1411,11 @@ pub async fn process_payment_notification(
         ));
     }
 
+    if OrderStatus::from(order.status) == OrderStatus::Refunded {
+        tx.commit().await?;
+        return get_order_by_no_impl(state, &notification.out_trade_no).await;
+    }
+
     if OrderStatus::from(order.status) == OrderStatus::Delivered {
         if let Some(reg_code_id) = order.reg_code_id {
             let now = Utc::now().fixed_offset();
@@ -1266,6 +1459,25 @@ pub async fn process_payment_notification(
     active.paid_at = Set(Some(now));
     active.updated_at = Set(now);
     let updated_order = active.update(&tx).await?;
+    if let (Some(user_id), Some(rate), Some(amount)) = (
+        updated_order.referrer_user_id,
+        updated_order.commission_rate_bps,
+        updated_order.commission_amount_cents,
+    ) {
+        let distribution = get_distribution_settings(state).await?;
+        let available_at = now + chrono::Duration::days(distribution.holding_days as i64);
+        new_commission_active_model(
+            updated_order.id,
+            user_id,
+            updated_order.amount_cents,
+            rate,
+            amount,
+            available_at,
+            now,
+        )
+        .insert(&tx)
+        .await?;
+    }
     let event = create_order_event(
         &tx,
         &updated_order,

@@ -26,6 +26,10 @@ pub struct Model {
     pub reg_code_id: Option<i32>,
     pub client_ip: Option<String>,
     pub provider_payload: Option<Json>,
+    pub referrer_user_id: Option<i32>,
+    pub referral_code: Option<String>,
+    pub commission_rate_bps: Option<i32>,
+    pub commission_amount_cents: Option<i32>,
     pub paid_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
@@ -33,6 +37,10 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_one = "super::distribution_commissions::Entity")]
+    DistributionCommissions,
+    #[sea_orm(has_one = "super::order_refunds::Entity")]
+    OrderRefunds,
     #[sea_orm(
         belongs_to = "super::apps::Entity",
         from = "Column::AppId",
@@ -57,6 +65,26 @@ pub enum Relation {
         on_delete = "SetNull"
     )]
     RegCodes,
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::ReferrerUserId",
+        to = "super::users::Column::Id",
+        on_update = "Cascade",
+        on_delete = "SetNull"
+    )]
+    Users,
+}
+
+impl Related<super::distribution_commissions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::DistributionCommissions.def()
+    }
+}
+
+impl Related<super::order_refunds::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::OrderRefunds.def()
+    }
 }
 
 impl Related<super::apps::Entity> for Entity {
@@ -74,6 +102,12 @@ impl Related<super::license_plans::Entity> for Entity {
 impl Related<super::reg_codes::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RegCodes.def()
+    }
+}
+
+impl Related<super::users::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Users.def()
     }
 }
 

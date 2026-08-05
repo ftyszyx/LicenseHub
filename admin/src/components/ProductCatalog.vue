@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { toDataURL } from 'qrcode'
 import { createOrder, fetchOrder, fetchPayMethods, fetchPublicPlans } from '@/apis/payments'
+import { fetchSiteSettings } from '@/apis/system_settings'
 import type {
   LicensePlan,
   OrderModel,
@@ -49,6 +50,31 @@ const payMethodsLoading = ref(false)
 const activeAppKey = ref('')
 const activeQrCodeDataUrl = ref('')
 let pollTimer: number | undefined
+const referralCode = ref('')
+
+async function initializeReferral() {
+  const settings = await fetchSiteSettings()
+  const storageKey = 'licensehub_referral'
+  if (!settings.distribution?.enabled) {
+    localStorage.removeItem(storageKey)
+    referralCode.value = ''
+    return
+  }
+  const ref = new URLSearchParams(window.location.search).get('ref')?.trim().toUpperCase()
+  if (ref) {
+    const expiresAt = Date.now() + settings.distribution.attribution_days * 86400000
+    localStorage.setItem(storageKey, JSON.stringify({ code: ref, expiresAt }))
+    referralCode.value = ref
+    return
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || 'null')
+    if (saved?.code && saved?.expiresAt > Date.now()) referralCode.value = saved.code
+    else localStorage.removeItem(storageKey)
+  } catch {
+    localStorage.removeItem(storageKey)
+  }
+}
 
 const appGroups = computed<AppPlanGroup[]>(() => {
   const groups = new Map<number, AppPlanGroup>()
@@ -171,7 +197,11 @@ async function confirmBuy() {
   creatingId.value = plan.id
   const payWindow = payType.value === 'wechat_native' ? null : window.open('', '_blank')
   try {
-    activeOrder.value = await createOrder({ plan_id: plan.id, pay_type: payType.value })
+    activeOrder.value = await createOrder({
+      plan_id: plan.id,
+      pay_type: payType.value,
+      referral_code: referralCode.value || undefined,
+    })
     checkoutDialogVisible.value = false
     selectedPlan.value = null
     if (activePayUrl.value) {
@@ -290,6 +320,7 @@ function payMethodsMessage(info: PayMethodsInfo | null) {
 }
 
 watch(() => props.appId, loadPlans, { immediate: true })
+void initializeReferral()
 
 watch(activeQrCode, async (code) => {
   if (!code) {
