@@ -1,4 +1,6 @@
 use crate::apis::auth_middleware::Claims;
+use crate::apis::email_verification_handler::{normalize_email, token_hash};
+use crate::apis::system_settings_handler::get_registration_enabled;
 use crate::core::app::AppState;
 use crate::core::constants;
 use crate::core::my_error::AppError;
@@ -7,10 +9,15 @@ use crate::core::response::ApiResponse;
 use crate::utils::jwt::create_jwt;
 use bcrypt::verify;
 use chrono::Utc;
-use data_model::{roles, user_roles, users};
+use data_model::{
+    email_verification_challenges, email_verification_tokens, roles, user_roles, users,
+};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::ToSchema;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
+    QueryFilter, QuerySelect, Set, Statement, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -18,6 +25,14 @@ use tracing::info;
 pub struct AuthPayload {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct RegisterPayload {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+    pub verification_token: String,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -33,47 +48,139 @@ pub struct ChangePasswordPayload {
 
 #[handler]
 pub async fn register(
-    json: JsonBody<AuthPayload>,
+    json: JsonBody<RegisterPayload>,
     depot: &mut Depot,
 ) -> Result<ApiResponse<AuthResponse>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
+    if !get_registration_enabled(state).await? {
+        return Err(AppError::business_logic(
+            "REGISTRATION_DISABLED",
+            "注册功能未开放",
+        ));
+    }
+    let username = normalize_username(&json.username)?;
+    validate_password(&json.password)?;
+    let email = normalize_email(&json.email)?;
+    let verification_token_hash = token_hash(json.verification_token.trim());
+    let password = bcrypt::hash(json.password.clone(), 10)?;
+    let tx = state.db.begin().await?;
+    let verification = email_verification_tokens::Entity::find_by_id(verification_token_hash)
+        .lock_exclusive()
+        .one(&tx)
+        .await?
+        .ok_or_else(|| {
+            AppError::business_logic(
+                "EMAIL_VERIFICATION_TOKEN_INVALID",
+                "邮箱验证凭证无效或已使用",
+            )
+        })?;
+    let now = Utc::now().fixed_offset();
+    if verification.consumed_at.is_some() || verification.purpose != "register" {
+        return Err(AppError::business_logic(
+            "EMAIL_VERIFICATION_TOKEN_INVALID",
+            "邮箱验证凭证无效或已使用",
+        ));
+    }
+    if verification.expires_at <= now {
+        return Err(AppError::business_logic(
+            "EMAIL_VERIFICATION_TOKEN_EXPIRED",
+            "邮箱验证凭证已过期",
+        ));
+    }
+    if verification.email != email {
+        return Err(AppError::business_logic(
+            "EMAIL_VERIFICATION_TOKEN_INVALID",
+            "邮箱与验证凭证不匹配",
+        ));
+    }
     let user_exists = users::Entity::find()
-        .filter(users::Column::Username.eq(&json.username))
-        .one(&state.db)
+        .filter(
+            sea_orm::Condition::any()
+                .add(users::Column::Username.eq(&username))
+                .add(users::Column::Email.eq(&email)),
+        )
+        .one(&tx)
         .await?;
     if user_exists.is_some() {
         return Err(AppError::user_already_exists());
     }
     let user_role = roles::Entity::find()
         .filter(roles::Column::Name.eq(constants::USER_ROLE))
-        .one(&state.db)
+        .one(&tx)
         .await?;
     let user_role = user_role.ok_or(AppError::not_found("role", None))?;
 
-    let password = bcrypt::hash(json.password.clone(), 10)?;
-    let now = Utc::now().fixed_offset();
     let new_user = users::ActiveModel {
-        username: Set(json.username.clone()),
+        username: Set(username),
         password: Set(password),
+        email: Set(Some(email.clone())),
+        email_verified_at: Set(Some(now)),
         referral_code: Set(crate::apis::user_handler::new_referral_code()),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
     }
-    .insert(&state.db)
+    .insert(&tx)
     .await?;
 
     user_roles::ActiveModel {
         user_id: Set(new_user.id),
         role_id: Set(user_role.id),
     }
-    .insert(&state.db)
+    .insert(&tx)
     .await?;
+
+    let challenge_id = verification.challenge_id;
+    let mut verification_active = verification.into_active_model();
+    verification_active.consumed_at = Set(Some(now));
+    verification_active.update(&tx).await?;
+    email_verification_challenges::Entity::update_many()
+        .col_expr(
+            email_verification_challenges::Column::ConsumedAt,
+            sea_orm::sea_query::Expr::value(Some(now)),
+        )
+        .filter(email_verification_challenges::Column::Id.eq(challenge_id))
+        .exec(&tx)
+        .await?;
+    tx.execute(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        r#"UPDATE "orders"
+           SET "buyer_user_id" = $1, "updated_at" = $2
+           WHERE "buyer_user_id" IS NULL
+             AND LOWER("buyer_email") = $3
+             AND "status" IN (1, 2, 5)"#,
+        [new_user.id.into(), now.into(), email.clone().into()],
+    ))
+    .await?;
+    tx.commit().await?;
 
     info!("User registered: {}", new_user.username);
     let token = create_jwt(new_user.id, vec![user_role.id], &state.config.jwt)
         .map_err(|_| AppError::auth_failed("Token creation failed"))?;
     Ok(ApiResponse::success(AuthResponse { token }))
+}
+
+fn normalize_username(value: &str) -> Result<String, AppError> {
+    let value = value.trim().to_string();
+    if !(3..=64).contains(&value.chars().count()) {
+        return Err(AppError::validation("用户名长度必须在 3 到 64 个字符之间"));
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        return Err(AppError::validation(
+            "用户名只能包含字母、数字、下划线、短横线和点",
+        ));
+    }
+    Ok(value)
+}
+
+fn validate_password(value: &str) -> Result<(), AppError> {
+    if !(8..=72).contains(&value.as_bytes().len()) {
+        return Err(AppError::validation("密码长度必须在 8 到 72 字节之间"));
+    }
+    Ok(())
 }
 
 #[handler]

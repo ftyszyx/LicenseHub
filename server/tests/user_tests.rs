@@ -6,6 +6,7 @@ mod helpers;
 
 #[tokio::test]
 async fn test_get_users_list() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let response = TestClient::get(helpers::get_url(
@@ -31,6 +32,7 @@ async fn test_get_users_list() {
 
 #[tokio::test]
 async fn test_get_users_list_default_pagination() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let response = TestClient::get(helpers::get_url("/api/admin/users/list"))
@@ -42,6 +44,7 @@ async fn test_get_users_list_default_pagination() {
 
 #[tokio::test]
 async fn test_get_users_list_with_search() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let response = TestClient::get(helpers::get_url(
@@ -58,6 +61,7 @@ async fn test_get_users_list_with_search() {
 
 #[tokio::test]
 async fn test_create_user() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let create_user_body = json!({
@@ -80,6 +84,7 @@ async fn test_create_user() {
 
 #[tokio::test]
 async fn test_get_user_by_id() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let create_user_body = json!({
@@ -108,6 +113,7 @@ async fn test_get_user_by_id() {
 
 #[tokio::test]
 async fn test_update_user() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let create_user_body = json!({
@@ -141,6 +147,7 @@ async fn test_update_user() {
 
 #[tokio::test]
 async fn test_delete_user() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let create_user_body = json!({
@@ -167,6 +174,7 @@ async fn test_delete_user() {
 
 #[tokio::test]
 async fn test_get_nonexistent_user() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let response = TestClient::get(helpers::get_url("/api/admin/users/99999"))
@@ -179,6 +187,7 @@ async fn test_get_nonexistent_user() {
 
 #[tokio::test]
 async fn test_users_without_auth() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let response = TestClient::get(helpers::get_url("/api/admin/users/list"))
         .send(&app)

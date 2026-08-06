@@ -18,6 +18,12 @@
       <el-table :data="rows" stripe size="large" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="order_no" :label="$t('orders.order_id')" min-width="210" />
+        <el-table-column label="购买用户" min-width="210">
+          <template #default="{ row }">
+            <div>{{ row.buyer_email || '未留邮箱' }}</div>
+            <div v-if="row.buyer_user_id" class="text-xs text-slate-400">用户 ID：{{ row.buyer_user_id }}</div>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('products.name')" min-width="160">
           <template #default="{ row }">{{ row.plan_name || row.plan_id }}</template>
         </el-table-column>

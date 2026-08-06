@@ -20,3 +20,8 @@ export const generateLicenseSigningKey = async (payload: GenerateLicenseSigningK
   const response = await request.post('/admin/system-settings/license-key', payload) as ApiResponse<SiteSettings>
   return response.data
 }
+
+export const sendSystemTestEmail = async (email: string) => {
+  const response = await request.post('/admin/system-settings/test-email', { email }) as ApiResponse<boolean>
+  return response.data
+}

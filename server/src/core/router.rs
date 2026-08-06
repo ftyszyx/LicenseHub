@@ -19,6 +19,8 @@ pub fn create_router(app_state: AppState) -> Service {
         .hoop(auth_middleware::error_handler)
         .push(Router::with_path("me").get(apis::auth::get_current_user))
         .push(Router::with_path("me/permissions").get(apis::auth::get_my_permissions))
+        .push(Router::with_path("me/orders").get(apis::payment_handler::list_my_orders))
+        .push(Router::with_path("me/orders/{order_no}").get(apis::payment_handler::get_my_order))
         .push(
             Router::with_path("me/distribution/summary")
                 .get(apis::distribution_handler::my_summary),
@@ -284,6 +286,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("system_settings", "UPDATE"))
                 .post(apis::system_settings_handler::generate_license_signing_key),
         )
+        .push(
+            Router::with_path("system-settings/test-email")
+                .hoop(RequirePerm::new("system_settings", "UPDATE"))
+                .post(apis::system_settings_handler::send_test_email),
+        )
         //reg_codes
         .push(
             Router::with_path("reg_codes")
@@ -344,10 +351,18 @@ pub fn create_router(app_state: AppState) -> Service {
         // .allow_headers(vec!["authorization","content-type"]).into_handler();
         .allow_headers(AllowHeaders::any())
         .into_handler();
-    let register_open = app_state.config.register_open;
-    let mut router = Router::new()
+    let router = Router::new()
         .hoop(affix_state::inject(app_state))
         .push(Router::with_path("/api/login").post(apis::auth::login))
+        .push(Router::with_path("/api/register").post(apis::auth::register))
+        .push(
+            Router::with_path("/api/auth/email-verifications")
+                .post(apis::email_verification_handler::start_email_verification),
+        )
+        .push(
+            Router::with_path("/api/auth/email-verifications/{challenge_id}/verify")
+                .post(apis::email_verification_handler::verify_email_code),
+        )
         .get(health_check)
         .push(
             Router::with_path("/api/site-settings")
@@ -383,9 +398,6 @@ pub fn create_router(app_state: AppState) -> Service {
                 .get(apis::use_record_handler::public_get_list),
         )
         .push(admin_routes);
-    if register_open {
-        router = router.push(Router::with_path("/api/register").post(apis::auth::register));
-    }
     //添加swagger-ui
     let doc = OpenApi::new("app_server_api", "1.0.0")
         .add_security_scheme(

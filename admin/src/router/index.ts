@@ -22,6 +22,7 @@ import UseRecordsAdminView from '@/views/admin/UseRecordsAdminView.vue'
 import UserHomeView from '@/views/user/UserHomeView.vue'
 import DistributionCenterView from '@/views/admin/DistributionCenterView.vue'
 import DistributionAdminView from '@/views/admin/DistributionAdminView.vue'
+import UserOrdersView from '@/views/user/UserOrdersView.vue'
 
 import { useAuthStore } from '@/stores/auth'
 import { fetchSiteSettings } from '@/apis/system_settings'
@@ -90,6 +91,11 @@ const router = createRouter({
                     path: RoutePath.UserHome,
                     name: RouteName.UserHome,
                     component: UserHomeView
+                },
+                {
+                    path: RoutePath.UserOrders,
+                    name: RouteName.UserOrders,
+                    component: UserOrdersView
                 },
                 {
                     path: RoutePath.UserDistribution,

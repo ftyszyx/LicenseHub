@@ -79,6 +79,15 @@ onMounted(() => { reload(); reloadRoles() })
         <el-table-column :label="$t('menu.roles')" min-width="140">
           <template #default="{ row }">{{ roleNames(row.role_ids || []) }}</template>
         </el-table-column>
+        <el-table-column label="邮箱" min-width="210">
+          <template #default="{ row }">
+            <div v-if="row.user.email" class="flex items-center gap-2">
+              <span class="break-all text-gray-700">{{ row.user.email }}</span>
+              <el-tag v-if="row.user.email_verified_at" size="small" type="success">已验证</el-tag>
+            </div>
+            <span v-else class="text-gray-400">未绑定</span>
+          </template>
+        </el-table-column>
         <el-table-column label="推广码" min-width="150" prop="user.referral_code" />
         <el-table-column label="佣金比例" width="110">
           <template #default="{ row }">{{ row.user.commission_rate_bps == null ? '默认' : `${(row.user.commission_rate_bps / 100).toFixed(2)}%` }}</template>

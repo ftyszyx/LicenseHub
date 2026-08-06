@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchOrder } from '@/apis/payments'
 import type { OrderModel } from '@/types/payments'
 import { OrderStatus } from '@/types/payments'
 import { RoutePath } from '@/types/route'
+import { useAuthStore } from '@/stores/auth'
+import { fetchSiteSettings } from '@/apis/system_settings'
 
 const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
 const loading = ref(false)
 const order = ref<OrderModel | null>(null)
 const loadError = ref('')
+const registrationEnabled = ref(false)
+const guestEmail = ref('')
 
 const orderNo = computed(() => {
   const value = route.query.order_no
@@ -73,6 +79,7 @@ async function loadOrder() {
   loadError.value = ''
   try {
     order.value = await fetchOrder(orderNo.value)
+    guestEmail.value = sessionStorage.getItem(`licensehub_order_email:${orderNo.value}`) || ''
   } catch {
     loadError.value = '订单查询失败，请稍后刷新页面'
   } finally {
@@ -80,7 +87,24 @@ async function loadOrder() {
   }
 }
 
-onMounted(loadOrder)
+function registerAndSaveOrder() {
+  void router.push({
+    path: RoutePath.Register,
+    query: {
+      redirect: RoutePath.UserOrders,
+      ...(guestEmail.value ? { email: guestEmail.value } : {}),
+    },
+  })
+}
+
+onMounted(async () => {
+  await loadOrder()
+  try {
+    registrationEnabled.value = Boolean((await fetchSiteSettings()).registration_enabled)
+  } catch {
+    registrationEnabled.value = false
+  }
+})
 </script>
 
 <template>
@@ -126,6 +150,14 @@ onMounted(loadOrder)
 
         <div class="mt-6 flex flex-wrap gap-3">
           <el-button type="primary" @click="loadOrder">刷新状态</el-button>
+          <el-button
+            v-if="order.status === OrderStatus.Delivered && !authStore.isAuthenticated && registrationEnabled"
+            type="success"
+            plain
+            @click="registerAndSaveOrder"
+          >
+            注册并保存本订单
+          </el-button>
           <RouterLink :to="RoutePath.Home">
             <el-button>继续购买</el-button>
           </RouterLink>

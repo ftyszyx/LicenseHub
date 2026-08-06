@@ -1,5 +1,7 @@
 use crate::apis::auth_middleware::Claims;
+use crate::apis::auth_middleware::optional_claims;
 use crate::apis::distribution_handler::{handle_commission_refund, new_commission_active_model};
+use crate::apis::email_verification_handler::normalize_email;
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
 use crate::apis::reg_codes_handler::{CodeType, RegCodeStatus, revoke_reg_code_for_order};
 use crate::apis::system_settings_handler::get_distribution_settings;
@@ -300,6 +302,7 @@ pub struct CreateOrderReq {
     pub plan_id: i32,
     pub pay_type: String,
     pub referral_code: Option<String>,
+    pub buyer_email: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -347,6 +350,8 @@ pub struct OrderInfo {
     pub url_scheme: Option<String>,
     pub reg_code_id: Option<i32>,
     pub reg_code: Option<String>,
+    pub buyer_user_id: Option<i32>,
+    pub buyer_email: Option<String>,
     pub referrer_user_id: Option<i32>,
     pub referral_code: Option<String>,
     pub commission_rate_bps: Option<i32>,
@@ -430,6 +435,8 @@ impl
             url_scheme: order.url_scheme,
             reg_code_id: order.reg_code_id,
             reg_code: None,
+            buyer_user_id: order.buyer_user_id,
+            buyer_email: order.buyer_email,
             referrer_user_id: order.referrer_user_id,
             referral_code: order.referral_code,
             commission_rate_bps: order.commission_rate_bps,
@@ -887,8 +894,11 @@ pub async fn create_order(
 ) -> Result<ApiResponse<OrderInfo>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let body = req.parse_json::<CreateOrderReq>().await?;
+    let buyer_user_id = optional_claims(req, state)
+        .map_err(|_| AppError::auth_failed("登录状态无效或已过期"))?
+        .map(|claims| claims.user_id);
     let client_ip = req.remote_addr().to_string();
-    let order = create_order_impl(state, body, Some(client_ip)).await?;
+    let order = create_order_impl(state, body, Some(client_ip), buyer_user_id).await?;
     Ok(ApiResponse::success(order))
 }
 
@@ -896,6 +906,7 @@ pub async fn create_order_impl(
     state: &AppState,
     req: CreateOrderReq,
     client_ip: Option<String>,
+    buyer_user_id: Option<i32>,
 ) -> Result<OrderInfo, AppError> {
     let pay_type = normalize_pay_type(&req.pay_type)?;
     let channel = find_payment_channel_by_pay_type(state, &pay_type).await?;
@@ -927,6 +938,21 @@ pub async fn create_order_impl(
         ));
     }
 
+    let buyer = if let Some(user_id) = buyer_user_id {
+        let user = users::Entity::find_by_id(user_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| AppError::auth_failed("用户不存在"))?;
+        (Some(user.id), user.email)
+    } else {
+        let email = req
+            .buyer_email
+            .as_deref()
+            .ok_or_else(|| AppError::business_logic("BUYER_EMAIL_REQUIRED", "游客购买需要填写邮箱"))
+            .and_then(normalize_email)?;
+        (None, Some(email))
+    };
+
     let now = Utc::now().fixed_offset();
     let order_no = new_order_no();
     let distribution = get_distribution_settings(state).await?;
@@ -941,12 +967,15 @@ pub async fn create_order_impl(
                 .filter(users::Column::ReferralCode.eq(code.to_ascii_uppercase()))
                 .one(&state.db)
                 .await?
-                .map(|user| {
+                .and_then(|user| {
+                    if Some(user.id) == buyer.0 {
+                        return None;
+                    }
                     let rate = user
                         .commission_rate_bps
                         .unwrap_or(distribution.default_rate_bps);
                     let amount = ((plan.price_cents as i64 * rate as i64) / 10000) as i32;
-                    (user.id, user.referral_code, rate, amount)
+                    Some((user.id, user.referral_code, rate, amount))
                 })
         } else {
             None
@@ -963,6 +992,8 @@ pub async fn create_order_impl(
         status: Set(i16::from(OrderStatus::Pending)),
         provider: Set(provider.clone()),
         client_ip: Set(client_ip.clone()),
+        buyer_user_id: Set(buyer.0),
+        buyer_email: Set(buyer.1),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -1062,6 +1093,60 @@ pub async fn list_orders(
         list.push(build_order_info(state, row).await?);
     }
     Ok(ApiResponse::success(PagingResponse { list, total, page }))
+}
+
+#[handler]
+pub async fn list_my_orders(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<PagingResponse<OrderInfo>>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let claims = depot.obtain::<Claims>().unwrap();
+    let params = req.parse_queries::<ListOrdersParams>()?;
+    let (page, page_size) = params.pagination.resolve()?;
+    let mut query = orders::Entity::find()
+        .filter(orders::Column::BuyerUserId.eq(claims.user_id))
+        .find_also_related(license_plans::Entity)
+        .find_also_related(apps::Entity)
+        .order_by_desc(orders::Column::CreatedAt);
+    if let Some(order_no) = params.order_no {
+        query = query.filter(orders::Column::OrderNo.contains(order_no));
+    }
+    if let Some(status) = params.status {
+        query = query.filter(orders::Column::Status.eq(status));
+    }
+    if let Some(plan_id) = params.plan_id {
+        query = query.filter(orders::Column::PlanId.eq(plan_id));
+    }
+    if let Some(app_id) = params.app_id {
+        query = query.filter(orders::Column::AppId.eq(app_id));
+    }
+    let paginator = query.paginate(&state.db, page_size);
+    let total = paginator.num_items().await.unwrap_or(0);
+    let rows = paginator.fetch_page(page - 1).await?;
+    let mut list = Vec::with_capacity(rows.len());
+    for row in rows {
+        list.push(build_order_info(state, row).await?);
+    }
+    Ok(ApiResponse::success(PagingResponse { list, total, page }))
+}
+
+#[handler]
+pub async fn get_my_order(
+    depot: &mut Depot,
+    order_no: PathParam<String>,
+) -> Result<ApiResponse<OrderInfo>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let claims = depot.obtain::<Claims>().unwrap();
+    let row = orders::Entity::find()
+        .filter(orders::Column::OrderNo.eq(order_no.into_inner()))
+        .filter(orders::Column::BuyerUserId.eq(claims.user_id))
+        .find_also_related(license_plans::Entity)
+        .find_also_related(apps::Entity)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("orders", None))?;
+    Ok(ApiResponse::success(build_order_info(state, row).await?))
 }
 
 #[handler]
@@ -1393,7 +1478,7 @@ pub async fn process_payment_notification(
     }
 
     let tx = state.db.begin().await?;
-    let order = orders::Entity::find()
+    let mut order = orders::Entity::find()
         .filter(orders::Column::OrderNo.eq(notification.out_trade_no.clone()))
         .lock_exclusive()
         .one(&tx)
@@ -1438,6 +1523,25 @@ pub async fn process_payment_notification(
             "AMOUNT_MISMATCH",
             "payment amount does not match order amount",
         ));
+    }
+
+    if order.buyer_user_id.is_none() {
+        if let Some(email) = order.buyer_email.as_deref() {
+            if let Some(user) = users::Entity::find()
+                .filter(users::Column::Email.eq(email))
+                .filter(users::Column::EmailVerifiedAt.is_not_null())
+                .one(&tx)
+                .await?
+            {
+                order.buyer_user_id = Some(user.id);
+                if order.referrer_user_id == Some(user.id) {
+                    order.referrer_user_id = None;
+                    order.referral_code = None;
+                    order.commission_rate_bps = None;
+                    order.commission_amount_cents = None;
+                }
+            }
+        }
     }
 
     let plan = license_plans::Entity::find_by_id(order.plan_id)

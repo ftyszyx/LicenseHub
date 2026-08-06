@@ -26,6 +26,8 @@ pub struct Model {
     pub reg_code_id: Option<i32>,
     pub client_ip: Option<String>,
     pub provider_payload: Option<Json>,
+    pub buyer_user_id: Option<i32>,
+    pub buyer_email: Option<String>,
     pub referrer_user_id: Option<i32>,
     pub referral_code: Option<String>,
     pub commission_rate_bps: Option<i32>,
@@ -72,7 +74,15 @@ pub enum Relation {
         on_update = "Cascade",
         on_delete = "SetNull"
     )]
-    Users,
+    ReferrerUser,
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::BuyerUserId",
+        to = "super::users::Column::Id",
+        on_update = "Cascade",
+        on_delete = "SetNull"
+    )]
+    BuyerUser,
 }
 
 impl Related<super::distribution_commissions::Entity> for Entity {
@@ -107,7 +117,7 @@ impl Related<super::reg_codes::Entity> for Entity {
 
 impl Related<super::users::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Users.def()
+        Relation::BuyerUser.def()
     }
 }
 

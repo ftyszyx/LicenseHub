@@ -4,6 +4,7 @@ mod helpers;
 
 #[tokio::test]
 async fn test_get_roles_list() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let response = TestClient::get(helpers::get_url(
@@ -21,6 +22,7 @@ async fn test_get_roles_list() {
 
 #[tokio::test]
 async fn test_roles_pagination() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let test_cases = vec![

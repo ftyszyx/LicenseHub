@@ -10,6 +10,7 @@ pub struct Config {
     pub payment: PaymentConfig,
     pub license_signing: LicenseSigningConfig,
     pub register_open: bool,
+    pub email_code_secret: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,10 @@ impl Config {
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
                 .map_err(|_| AppError::Message("Invalid REGISTER_OPEN value".to_string()))?,
+            email_code_secret: env::var("EMAIL_CODE_SECRET")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
         })
     }
 }

@@ -19,6 +19,11 @@ const sensitiveKeys = new Set([
   'alipay_account',
   'real_name',
   'settlement_account',
+  'email',
+  'code',
+  'verification_token',
+  'email_smtp_password',
+  'smtp_password',
 ])
 
 function sanitizeForLog(value: unknown): unknown {

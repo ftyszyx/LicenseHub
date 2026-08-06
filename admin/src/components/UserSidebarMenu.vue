@@ -35,6 +35,7 @@ const menuItems = computed<AdminMenuItem[]>(() => [{
   index: 'user',
   children: [
     { label: '首页', icon: 'House', path: RoutePath.UserHome },
+    { label: '我的订单', icon: 'Tickets', path: RoutePath.UserOrders },
     ...(distributionEnabled.value
       ? [{ label: '推广中心', icon: 'Promotion', path: RoutePath.UserDistribution }]
       : []),

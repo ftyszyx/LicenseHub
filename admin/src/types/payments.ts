@@ -85,6 +85,8 @@ export interface OrderModel {
   url_scheme?: string | null
   reg_code_id?: number | null
   reg_code?: string | null
+  buyer_user_id?: number | null
+  buyer_email?: string | null
   refund?: OrderRefundInfo | null
   paid_at?: string | null
   created_at: string
@@ -102,6 +104,7 @@ export interface CreateOrderReq {
   plan_id: number
   pay_type: string
   referral_code?: string
+  buyer_email?: string
 }
 
 export interface ConfirmOrderRefundReq {

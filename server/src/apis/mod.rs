@@ -4,6 +4,7 @@ pub mod auth_middleware;
 pub mod dashboard_handler;
 pub mod device_handler;
 pub mod distribution_handler;
+pub mod email_verification_handler;
 pub mod list_api;
 pub mod log_middleware;
 pub mod payment_handler;

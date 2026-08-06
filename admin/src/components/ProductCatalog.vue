@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { toDataURL } from 'qrcode'
@@ -17,6 +18,7 @@ import type {
 import { OrderStatus } from '@/types/payments'
 import { RegCodeType } from '@/types/reg_codes'
 import { RoutePath } from '@/types'
+import { useAuthStore } from '@/stores/auth'
 
 const props = withDefaults(defineProps<{
   appId?: number | null
@@ -29,6 +31,8 @@ const props = withDefaults(defineProps<{
 })
 
 const { t } = useI18n()
+const router = useRouter()
+const authStore = useAuthStore()
 
 type AppPlanGroup = {
   appId: number
@@ -51,9 +55,15 @@ const activeAppKey = ref('')
 const activeQrCodeDataUrl = ref('')
 let pollTimer: number | undefined
 const referralCode = ref('')
+const registrationEnabled = ref(false)
+const distributionEnabled = ref(false)
+const guestEmail = ref('')
+let checkoutIntentRestored = false
 
 async function initializeReferral() {
   const settings = await fetchSiteSettings()
+  registrationEnabled.value = Boolean(settings.registration_enabled)
+  distributionEnabled.value = Boolean(settings.distribution?.enabled)
   const storageKey = 'licensehub_referral'
   if (!settings.distribution?.enabled) {
     localStorage.removeItem(storageKey)
@@ -144,8 +154,19 @@ const enabledPayMethods = computed(() => {
 })
 
 const canConfirmBuy = computed(() => {
-  return !!selectedPlan.value && !!payType.value && enabledPayMethods.value.length > 0
+  return !!selectedPlan.value
+    && !!payType.value
+    && enabledPayMethods.value.length > 0
+    && (authStore.isAuthenticated || validEmail(guestEmail.value))
 })
+
+const registrationPrompt = computed(() => distributionEnabled.value
+  ? '注册后可长期保存订单和注册码，还能分享推广链接，好友购买后获得佣金。'
+  : '注册后可长期保存订单和注册码，登录后随时查看。')
+
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
 
 function formatPrice(cents: number) {
   return (cents / 100).toFixed(2)
@@ -179,6 +200,7 @@ async function loadPlans() {
     catalogState.value = result.state
     catalogAppName.value = result.app_name || null
     plans.value = result.plans
+    await restoreCheckoutIntent()
   } finally {
     loading.value = false
   }
@@ -191,17 +213,67 @@ async function buy(plan: LicensePlan) {
   await loadPayMethods()
 }
 
+async function restoreCheckoutIntent() {
+  if (checkoutIntentRestored || !authStore.isAuthenticated) return
+  checkoutIntentRestored = true
+  try {
+    const intent = JSON.parse(sessionStorage.getItem('licensehub_checkout_intent') || 'null')
+    if (!intent?.planId || intent.expiresAt < Date.now()) {
+      sessionStorage.removeItem('licensehub_checkout_intent')
+      return
+    }
+    const plan = plans.value.find(item => item.id === intent.planId)
+    if (!plan) return
+    sessionStorage.removeItem('licensehub_checkout_intent')
+    await buy(plan)
+    if (enabledPayMethods.value.some(item => item.pay_type === intent.payType)) {
+      payType.value = intent.payType
+    }
+  } catch {
+    sessionStorage.removeItem('licensehub_checkout_intent')
+  }
+}
+
+function saveCheckoutIntent(plan?: LicensePlan | null) {
+  sessionStorage.setItem('licensehub_checkout_intent', JSON.stringify({
+    planId: plan?.id || selectedPlan.value?.id || null,
+    payType: payType.value || null,
+    referralCode: referralCode.value || null,
+    expiresAt: Date.now() + 30 * 60 * 1000,
+  }))
+}
+
+function goRegister(plan?: LicensePlan | null, redirect?: string) {
+  saveCheckoutIntent(plan)
+  void router.push({
+    path: RoutePath.Register,
+    query: {
+      redirect: redirect || `${window.location.pathname}${window.location.search}`,
+      ...(guestEmail.value ? { email: guestEmail.value.trim() } : {}),
+    },
+  })
+}
+
+function goLogin() {
+  void router.push(RoutePath.Login)
+}
+
 async function confirmBuy() {
   const plan = selectedPlan.value
   if (!plan || !payType.value) return
   creatingId.value = plan.id
   const payWindow = payType.value === 'wechat_native' ? null : window.open('', '_blank')
   try {
-    activeOrder.value = await createOrder({
+    const order = await createOrder({
       plan_id: plan.id,
       pay_type: payType.value,
       referral_code: referralCode.value || undefined,
+      buyer_email: authStore.isAuthenticated ? undefined : guestEmail.value.trim(),
     })
+    activeOrder.value = order
+    if (!authStore.isAuthenticated) {
+      sessionStorage.setItem(`licensehub_order_email:${order.order_no}`, guestEmail.value.trim())
+    }
     checkoutDialogVisible.value = false
     selectedPlan.value = null
     if (activePayUrl.value) {
@@ -353,6 +425,17 @@ onBeforeUnmount(stopPolling)
         </div>
       </div>
       <template v-else>
+        <div
+          v-if="!authStore.isAuthenticated && registrationEnabled"
+          class="mb-5 flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p class="text-sm leading-6 text-emerald-950">{{ registrationPrompt }}</p>
+          <div class="flex shrink-0 gap-2">
+            <el-button type="success" plain @click="goRegister(null)">立即注册</el-button>
+            <el-button @click="goLogin">登录</el-button>
+          </div>
+        </div>
+
         <div v-if="grouped && appGroups.length" class="mb-6">
           <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div class="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1">
@@ -455,6 +538,15 @@ onBeforeUnmount(stopPolling)
               </div>
             </div>
           </div>
+          <div v-if="!authStore.isAuthenticated" class="rounded-lg border border-slate-200 p-4">
+            <div class="text-sm font-semibold text-slate-800">购买邮箱</div>
+            <p class="mt-1 text-xs leading-5 text-slate-500">用于找回订单；注册并验证此邮箱后，订单会自动保存到账号。</p>
+            <el-input v-model="guestEmail" class="mt-3" maxlength="320" autocomplete="email" placeholder="name@example.com" />
+            <div v-if="registrationEnabled" class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span>也可以先注册，购买后直接进入“我的订单”。</span>
+              <el-button link type="primary" @click="goRegister(selectedPlan)">注册账号</el-button>
+            </div>
+          </div>
           <div class="text-sm font-semibold text-slate-800">{{ $t('products_page.select_pay_method') }}</div>
           <el-skeleton v-if="payMethodsLoading" :rows="2" animated />
           <div v-else-if="enabledPayMethods.length" class="flex flex-wrap gap-2">
@@ -530,6 +622,14 @@ onBeforeUnmount(stopPolling)
             </template>
             <template #extra>
               <el-button v-if="activeOrder.reg_code" type="primary" @click="copy(activeOrder.reg_code)">{{ $t('order_query.copy_reg_code') }}</el-button>
+              <el-button
+                v-if="!authStore.isAuthenticated && registrationEnabled"
+                type="success"
+                plain
+                @click="goRegister(null, RoutePath.UserOrders)"
+              >
+                注册并保存本订单
+              </el-button>
             </template>
           </el-result>
         </div>

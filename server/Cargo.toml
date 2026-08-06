@@ -51,6 +51,8 @@ base64 = "0.22"
 ed25519-dalek = "2"
 sha2 = "0.10"
 getrandom = "0.3"
+hmac = "0.12"
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "pool", "smtp-transport", "tokio1-rustls-tls"] }
 
 #其它
 bcrypt = "0.17.0"
@@ -60,6 +62,7 @@ serde_json = "1.0.140"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 url = "2.5"
 validator = { version = "0.20.0", features = ["derive"] }
+email_address = "0.2"
 futures = "0.3.31"
 redis = { version = "0.32.4", features = ["tokio-comp", "json", "aio"] }
 http-body-util = "0.1"

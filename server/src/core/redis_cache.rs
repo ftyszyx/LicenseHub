@@ -79,6 +79,25 @@ impl RedisCache {
         Ok(())
     }
 
+    pub async fn increment_counter(&self, key: &str, ttl: Duration) -> Result<i64, AppError> {
+        let mut conn = self.get_conn().await?;
+        let key = format!("{}{}", self.key_prefix, key);
+        let script = redis::Script::new(
+            r#"
+            local value = redis.call('INCR', KEYS[1])
+            if value == 1 then
+                redis.call('EXPIRE', KEYS[1], ARGV[1])
+            end
+            return value
+            "#,
+        );
+        Ok(script
+            .key(key)
+            .arg(ttl.as_secs())
+            .invoke_async(&mut conn)
+            .await?)
+    }
+
     #[allow(dead_code)]
     pub async fn del(&self, key: &str) -> Result<(), AppError> {
         let mut conn = self.get_conn().await?;

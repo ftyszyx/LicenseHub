@@ -100,7 +100,8 @@ async fn create_delivered_referral_order(
         .json(&json!({
             "plan_id": plan_id,
             "pay_type": "wechat_native",
-            "referral_code": referral_code
+            "referral_code": referral_code,
+            "buyer_email": format!("{}@example.com", label.to_ascii_lowercase())
         }))
         .send(&ctx.app)
         .await;
@@ -174,7 +175,11 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
 
     let resp = TestClient::post(helpers::get_url("/api/orders"))
         .add_header("content-type", "application/json", true)
-        .json(&json!({"plan_id": plan_id, "pay_type": "wechat_native"}))
+        .json(&json!({
+            "plan_id": plan_id,
+            "pay_type": "wechat_native",
+            "buyer_email": "payment-test@example.com"
+        }))
         .send(&ctx.app)
         .await;
     let json = helpers::print_response_body_get_json(resp, "create_order").await;
@@ -304,7 +309,8 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
         .json(&json!({
             "plan_id": plan_id,
             "pay_type": "wechat_native",
-            "referral_code": referral_code
+            "referral_code": referral_code,
+            "buyer_email": "refund-test@example.com"
         }))
         .send(&ctx.app)
         .await;
@@ -884,7 +890,11 @@ async fn test_public_products_hide_disabled_app_and_reject_order() {
 
     let resp = TestClient::post(helpers::get_url("/api/orders"))
         .add_header("content-type", "application/json", true)
-        .json(&json!({"plan_id": plan_id, "pay_type": "wechat_native"}))
+        .json(&json!({
+            "plan_id": plan_id,
+            "pay_type": "wechat_native",
+            "buyer_email": "disabled-plan@example.com"
+        }))
         .send(&ctx.app)
         .await;
     let json = helpers::print_response_body_get_json(resp, "create_disabled_app_order").await;

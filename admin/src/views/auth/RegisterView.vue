@@ -1,63 +1,175 @@
 <template>
-  <div class="flex items-center justify-center min-h-screen bg-[#2d3748]">
-    <div class="w-full max-w-sm p-8 space-y-6 bg-[#4a5568] rounded-lg shadow-lg">
-      <div class="flex justify-center">
-        <svg class="w-16 h-16 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
-        </svg>
-      </div>
-      <h2 class="text-2xl font-bold text-center text-white">{{ $t('auth.register') }}</h2>
-      <form @submit.prevent="handleRegister" class="space-y-6">
+  <main class="min-h-screen bg-slate-100 px-4 py-10 sm:px-6">
+    <section class="mx-auto w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+      <div class="mb-7 flex items-center gap-3">
+        <span class="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-600 text-white">
+          <el-icon :size="23"><User /></el-icon>
+        </span>
         <div>
-          <input type="text" :placeholder="$t('auth.username')" v-model="username" required class="w-full px-4 py-2 text-gray-900 bg-white border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <h1 class="text-xl font-semibold text-slate-950">创建账号</h1>
+          <p class="mt-1 text-sm text-slate-500">验证邮箱后保存订单、注册码和推广收益。</p>
         </div>
-        <div class="relative">
-          <input :type="passwordFieldType" :placeholder="$t('auth.password')" v-model="password" required class="w-full px-4 py-2 text-gray-900 bg-white border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div class="relative">
-          <input :type="passwordFieldType" :placeholder="$t('auth.confirm_password')" v-model="confirmPassword" required class="w-full px-4 py-2 text-gray-900 bg-white border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <button type="submit" class="w-full px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500">
-          {{ $t('auth.register') }}
-        </button>
-        <div class="text-center">
-          <router-link to="/login" class="text-sm text-blue-400 hover:underline">{{ $t('auth.have_account_login') }}</router-link>
-        </div>
-      </form>
-    </div>
-  </div>
+      </div>
+
+      <el-skeleton v-if="settingsLoading" :rows="7" animated />
+      <el-result
+        v-else-if="!registrationEnabled"
+        icon="info"
+        title="注册功能暂未开放"
+        sub-title="现有账号仍可正常登录和使用。"
+      >
+        <template #extra>
+          <el-button type="primary" @click="router.push(RoutePath.Login)">前往登录</el-button>
+          <el-button @click="router.push(RoutePath.Home)">返回商城</el-button>
+        </template>
+      </el-result>
+
+      <el-form v-else :model="form" label-position="top" @submit.prevent="handleRegister">
+        <el-form-item label="用户名">
+          <el-input v-model="form.username" maxlength="64" autocomplete="username" placeholder="3-64 位字母、数字或 _ - ." />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="form.email" maxlength="320" autocomplete="email" placeholder="用于验证和认领历史订单" @input="resetEmailVerification">
+            <template #append>
+              <el-button :disabled="cooldown > 0" :loading="sendingCode" @click="sendEmailCode">
+                {{ cooldown > 0 ? `${cooldown} 秒` : '发送验证码' }}
+              </el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="邮箱验证码">
+          <el-input v-model="form.emailCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="请输入 6 位验证码" />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="form.password" type="password" show-password autocomplete="new-password" placeholder="8-72 个字符" />
+        </el-form-item>
+        <el-form-item label="确认密码">
+          <el-input v-model="form.confirmPassword" type="password" show-password autocomplete="new-password" placeholder="再次输入密码" />
+        </el-form-item>
+        <el-button native-type="submit" type="primary" class="mt-2 w-full" size="large" :loading="submitting">
+          注册并登录
+        </el-button>
+      </el-form>
+
+      <div v-if="registrationEnabled" class="mt-6 text-center text-sm text-slate-500">
+        已有账号？
+        <router-link :to="RoutePath.Login" class="font-medium text-blue-600 hover:text-blue-700">去登录</router-link>
+      </div>
+    </section>
+
+  </main>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { startEmailVerification, verifyEmailCode } from '@/apis/auth'
+import { fetchSiteSettings } from '@/apis/system_settings'
+import { useAuthStore } from '@/stores/auth'
 import { RoutePath } from '@/types'
 
-const username = ref('')
-const password = ref('')
-const confirmPassword = ref('')
-const showPassword = ref(false)
-
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
-const { t } = useI18n()
+const form = reactive({ username: '', email: '', emailCode: '', password: '', confirmPassword: '' })
+const settingsLoading = ref(true)
+const registrationEnabled = ref(false)
+const sendingCode = ref(false)
+const submitting = ref(false)
+const challengeId = ref('')
+const verifiedEmail = ref('')
+const cooldown = ref(0)
+let cooldownTimer: number | undefined
 
-const passwordFieldType = computed(() => (showPassword.value ? 'text' : 'password'))
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
 
-const handleRegister = async () => {
-  if (password.value !== confirmPassword.value) {
-    ElMessage.error(t('auth.password_mismatch'))
-    return
-  }
-  try {
-    await authStore.register({ username: username.value, password: password.value })
-    router.push(RoutePath.UserHome)
-  } catch (error) {
-    ElMessage.error(t('auth.register_failed'))
-    console.error(error)
+function resetEmailVerification() {
+  if (form.email.trim().toLowerCase() !== verifiedEmail.value) {
+    challengeId.value = ''
+    form.emailCode = ''
   }
 }
+
+async function sendEmailCode() {
+  if (!validEmail(form.email)) {
+    ElMessage.warning('请先填写正确的邮箱地址')
+    return
+  }
+  sendingCode.value = true
+  try {
+    const result = await startEmailVerification({ email: form.email.trim() })
+    challengeId.value = result.challenge_id
+    verifiedEmail.value = form.email.trim().toLowerCase()
+    startCooldown(result.resend_after_seconds)
+    ElMessage.success('验证码已发送，请检查邮箱')
+  } finally {
+    sendingCode.value = false
+  }
+}
+
+function startCooldown(seconds: number) {
+  if (cooldownTimer) window.clearInterval(cooldownTimer)
+  cooldown.value = seconds
+  cooldownTimer = window.setInterval(() => {
+    cooldown.value = Math.max(0, cooldown.value - 1)
+    if (cooldown.value === 0 && cooldownTimer) {
+      window.clearInterval(cooldownTimer)
+      cooldownTimer = undefined
+    }
+  }, 1000)
+}
+
+async function handleRegister() {
+  if (!challengeId.value || form.email.trim().toLowerCase() !== verifiedEmail.value) {
+    ElMessage.warning('请先发送邮箱验证码')
+    return
+  }
+  if (!/^\d{6}$/.test(form.emailCode.trim())) {
+    ElMessage.warning('请输入 6 位邮箱验证码')
+    return
+  }
+  if (form.password.length < 8 || form.password.length > 72) {
+    ElMessage.warning('密码长度必须在 8 到 72 个字符之间')
+    return
+  }
+  if (form.password !== form.confirmPassword) {
+    ElMessage.warning('两次输入的密码不一致')
+    return
+  }
+  submitting.value = true
+  try {
+    const verified = await verifyEmailCode(challengeId.value, form.emailCode.trim())
+    await authStore.register({
+      username: form.username.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      verification_token: verified.verification_token,
+    })
+    ElMessage.success('注册成功')
+    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+      ? route.query.redirect
+      : RoutePath.UserHome
+    await router.push(redirect)
+  } finally {
+    submitting.value = false
+  }
+}
+
+onMounted(async () => {
+  const email = typeof route.query.email === 'string' ? route.query.email : ''
+  if (email) form.email = email
+  try {
+    registrationEnabled.value = Boolean((await fetchSiteSettings()).registration_enabled)
+  } finally {
+    settingsLoading.value = false
+  }
+})
+
+onBeforeUnmount(() => {
+  if (cooldownTimer) window.clearInterval(cooldownTimer)
+})
 </script>

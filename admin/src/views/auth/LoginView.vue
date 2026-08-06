@@ -48,7 +48,7 @@
         >
           {{ $t('auth.login') }}
         </button>
-        <div class="text-center">
+        <div v-if="registrationEnabled" class="text-center">
           <router-link to="/register" class="text-sm text-blue-400 hover:underline">{{ $t('auth.no_account_register') }}</router-link>
         </div>
       </form>
@@ -58,16 +58,19 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { RoutePath } from '@/types'
 import { useI18n } from 'vue-i18n'
+import { fetchSiteSettings } from '@/apis/system_settings'
 
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
+const registrationEnabled = ref(false)
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 useI18n()
 
@@ -79,10 +82,17 @@ const togglePasswordVisibility = () => {
 
 const handleLogin = async () => {
     await authStore.login({username: username.value, password: password.value})
-    router.push(authStore.isAdmin ? RoutePath.AdminDashboard : RoutePath.UserHome)
+    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+      ? route.query.redirect
+      : null
+    router.push(redirect || (authStore.isAdmin ? RoutePath.AdminDashboard : RoutePath.UserHome))
 }
 
-onMounted(() => {
-  // generateCaptcha() // Removed captcha logic
+onMounted(async () => {
+  try {
+    registrationEnabled.value = Boolean((await fetchSiteSettings()).registration_enabled)
+  } catch {
+    registrationEnabled.value = false
+  }
 })
 </script>

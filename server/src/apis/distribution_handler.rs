@@ -1102,6 +1102,14 @@ pub(crate) async fn handle_commission_refund(
         .await?;
     }
 
+    // Rejecting a pending settlement releases locked commission amounts. Reload the
+    // row so the refund calculation uses the post-rejection allocation state.
+    let commission = distribution_commissions::Entity::find_by_id(commission.id)
+        .lock_exclusive()
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("distribution_commissions", None))?;
+
     let exposed_amount = commission.settled_amount_cents + commission.adjustment_amount_cents;
     let cancelled_amount =
         (commission.commission_amount_cents - exposed_amount - commission.locked_amount_cents)

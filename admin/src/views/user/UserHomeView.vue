@@ -15,6 +15,7 @@
 
       <el-descriptions class="mt-5" :column="2" border>
         <el-descriptions-item label="用户 ID">{{ user?.id ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="邮箱">{{ user?.email || '历史账号暂未绑定邮箱' }}</el-descriptions-item>
         <el-descriptions-item label="注册时间">{{ formatDate(user?.created_at) }}</el-descriptions-item>
       </el-descriptions>
     </section>
@@ -23,7 +24,7 @@
       <h3 class="text-base font-semibold text-slate-950">快捷入口</h3>
       <div class="mt-4 flex flex-wrap gap-3">
         <el-button type="primary" :icon="ShoppingBag" @click="router.push(RoutePath.Home)">返回商城</el-button>
-        <el-button :icon="Search" @click="router.push(RoutePath.OrderQuery)">订单查询</el-button>
+        <el-button :icon="Tickets" @click="router.push(RoutePath.UserOrders)">我的订单</el-button>
       </div>
     </section>
   </div>
@@ -32,7 +33,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Search, ShoppingBag } from '@element-plus/icons-vue'
+import { ShoppingBag, Tickets } from '@element-plus/icons-vue'
 import { sentGetUserInfo } from '@/apis/auth'
 import { RoutePath } from '@/types'
 import type { UserModel } from '@/types'

@@ -7,6 +7,8 @@ pub mod distribution_commissions;
 pub mod distribution_settlement_items;
 pub mod distribution_settlement_proofs;
 pub mod distribution_settlements;
+pub mod email_verification_challenges;
+pub mod email_verification_tokens;
 pub mod license_plans;
 pub mod order_events;
 pub mod order_refunds;

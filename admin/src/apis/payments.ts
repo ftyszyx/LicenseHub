@@ -69,6 +69,16 @@ export const fetchOrders = async (params: ListOrdersParams = {}) => {
   return response.data
 }
 
+export const fetchMyOrders = async (params: ListOrdersParams = {}) => {
+  const response = await request.get('/admin/me/orders', { params }) as ApiResponse<PagingResponse<OrderModel>>
+  return response.data
+}
+
+export const fetchMyOrder = async (orderNo: string) => {
+  const response = await request.get(`/admin/me/orders/${orderNo}`) as ApiResponse<OrderModel>
+  return response.data
+}
+
 export const confirmOrderRefund = async (id: number, payload: ConfirmOrderRefundReq) => {
   const response = await request.post(`/admin/orders/${id}/refund`, payload) as ApiResponse<OrderModel>
   return response.data

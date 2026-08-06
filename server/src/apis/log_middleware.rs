@@ -208,7 +208,7 @@ fn is_sensitive_key(key: &str) -> bool {
         || key.contains("credential")
         || matches!(
             key.as_str(),
-            "account" | "alipay_account" | "real_name" | "settlement_account"
+            "account" | "alipay_account" | "real_name" | "settlement_account" | "email" | "code"
         )
 }
 

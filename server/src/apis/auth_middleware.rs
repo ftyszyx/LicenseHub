@@ -10,29 +10,29 @@ pub struct Claims {
     pub exp: usize, //过期时间
 }
 
-#[handler]
-pub async fn auth(req: &mut Request, depot: &mut Depot) -> Result<(), StatusCode> {
-    let state = depot.obtain::<AppState>().unwrap();
-    let token = req
-        .headers()
-        .get("Authorization")
-        .and_then(|auth_header| auth_header.to_str().ok())
-        .and_then(|auth_value| {
-            if auth_value.starts_with("Bearer ") {
-                Some(auth_value[7..].to_owned())
-            } else {
-                None
-            }
-        });
-
-    let token = token.ok_or(StatusCode::UNAUTHORIZED)?;
+pub fn optional_claims(req: &Request, state: &AppState) -> Result<Option<Claims>, StatusCode> {
+    let Some(header) = req.headers().get("Authorization") else {
+        return Ok(None);
+    };
+    let value = header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let token = value
+        .strip_prefix("Bearer ")
+        .filter(|token| !token.trim().is_empty())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     let decoded = decode::<Claims>(
-        &token,
+        token,
         &DecodingKey::from_secret(state.config.jwt.secret.as_ref()),
         &Validation::default(),
     )
     .map_err(|_| StatusCode::UNAUTHORIZED)?;
-    depot.inject(decoded.claims);
+    Ok(Some(decoded.claims))
+}
+
+#[handler]
+pub async fn auth(req: &mut Request, depot: &mut Depot) -> Result<(), StatusCode> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let claims = optional_claims(req, state)?.ok_or(StatusCode::UNAUTHORIZED)?;
+    depot.inject(claims);
     // ctrl.call_next(req, depot, res).await;
     Ok(())
 }

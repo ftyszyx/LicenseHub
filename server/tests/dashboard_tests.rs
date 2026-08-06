@@ -126,7 +126,11 @@ async fn fetch_dashboard(ctx: &helpers::TestContext) -> serde_json::Value {
 async fn create_order(ctx: &helpers::TestContext, plan_id: i32) -> String {
     let resp = TestClient::post(helpers::get_url("/api/orders"))
         .add_header("content-type", "application/json", true)
-        .json(&json!({"plan_id": plan_id, "pay_type": "wechat_native"}))
+        .json(&json!({
+            "plan_id": plan_id,
+            "pay_type": "wechat_native",
+            "buyer_email": "dashboard-test@example.com"
+        }))
         .send(&ctx.app)
         .await;
     let json = helpers::print_response_body_get_json(resp, "dashboard_create_order").await;

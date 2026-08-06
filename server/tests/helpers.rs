@@ -53,7 +53,18 @@ pub async fn create_test_context() -> TestContext {
         .await
         .unwrap();
     println!("clean database");
-    sqlx::migrate!("./migrations").undo(&pool, 0).await.unwrap();
+    assert!(
+        app_state.config.database.db_name.ends_with("_test"),
+        "refusing to reset a non-test database"
+    );
+    sqlx::query("DROP SCHEMA public CASCADE")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE SCHEMA public")
+        .execute(&pool)
+        .await
+        .unwrap();
     println!("init database");
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     println!("init database success");

@@ -9,6 +9,8 @@ pub use super::distribution_commissions::Entity as DistributionCommissions;
 pub use super::distribution_settlement_items::Entity as DistributionSettlementItems;
 pub use super::distribution_settlement_proofs::Entity as DistributionSettlementProofs;
 pub use super::distribution_settlements::Entity as DistributionSettlements;
+pub use super::email_verification_challenges::Entity as EmailVerificationChallenges;
+pub use super::email_verification_tokens::Entity as EmailVerificationTokens;
 pub use super::license_plans::Entity as LicensePlans;
 pub use super::order_events::Entity as OrderEvents;
 pub use super::order_refunds::Entity as OrderRefunds;

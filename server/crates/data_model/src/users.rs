@@ -12,6 +12,8 @@ pub struct Model {
     pub username: String,
     #[serde(skip_serializing)]
     pub password: String,
+    pub email: Option<String>,
+    pub email_verified_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(unique)]
     pub referral_code: String,
     pub commission_rate_bps: Option<i32>,
@@ -34,7 +36,9 @@ pub enum Relation {
     #[sea_orm(has_many = "super::order_refunds::Entity")]
     OrderRefunds,
     #[sea_orm(has_many = "super::orders::Entity")]
-    Orders,
+    BuyerOrders,
+    #[sea_orm(has_many = "super::orders::Entity")]
+    ReferredOrders,
     #[sea_orm(has_many = "super::user_roles::Entity")]
     UserRoles,
 }
@@ -97,6 +101,8 @@ mod tests {
             id: 1,
             username: "admin".to_string(),
             password: "bcrypt-hash".to_string(),
+            email: Some("admin@example.com".to_string()),
+            email_verified_at: Some(now),
             referral_code: "LHREFERRAL".to_string(),
             commission_rate_bps: None,
             settlement_account: None,

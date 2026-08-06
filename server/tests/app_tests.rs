@@ -6,6 +6,7 @@ mod helpers;
 
 #[tokio::test]
 async fn test_get_apps_list() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
     let url = helpers::get_url("/api/admin/apps/list?page=1&page_size=10");
@@ -22,6 +23,7 @@ async fn test_get_apps_list() {
 
 #[tokio::test]
 async fn test_create_app() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
 
@@ -68,6 +70,7 @@ async fn test_create_app() {
 
 #[tokio::test]
 async fn test_get_app_by_id() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
 
@@ -108,6 +111,7 @@ async fn test_get_app_by_id() {
 
 #[tokio::test]
 async fn test_update_app() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
 
@@ -154,6 +158,7 @@ async fn test_update_app() {
 
 #[tokio::test]
 async fn test_delete_app() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
 
@@ -193,6 +198,7 @@ async fn test_delete_app() {
 
 #[tokio::test]
 async fn test_apps_pagination() {
+    let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;
     let token = helpers::login_admin(&app).await;
 

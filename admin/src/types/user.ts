@@ -8,6 +8,8 @@ export interface ChangePasswordPayload {
 export interface UserModel {
   id: number
   username: string
+  email?: string | null
+  email_verified_at?: string | null
   referral_code: string
   commission_rate_bps?: number | null
   created_at: string
