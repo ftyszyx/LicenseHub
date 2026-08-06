@@ -13,6 +13,7 @@ export interface RegisterPayload {
     email: string;
     password: string;
     verification_token: string;
+    referral_code?: string;
 }
 
 export interface StartEmailVerificationPayload {

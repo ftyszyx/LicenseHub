@@ -16,6 +16,9 @@ pub struct Model {
     pub email_verified_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(unique)]
     pub referral_code: String,
+    pub referrer_user_id: Option<i32>,
+    pub referrer_bound_at: Option<DateTimeWithTimeZone>,
+    pub registered_referral_code: Option<String>,
     pub commission_rate_bps: Option<i32>,
     #[serde(skip_serializing)]
     pub settlement_account: Option<Json>,
@@ -104,6 +107,9 @@ mod tests {
             email: Some("admin@example.com".to_string()),
             email_verified_at: Some(now),
             referral_code: "LHREFERRAL".to_string(),
+            referrer_user_id: None,
+            referrer_bound_at: None,
+            registered_referral_code: None,
             commission_rate_bps: None,
             settlement_account: None,
             created_at: now,

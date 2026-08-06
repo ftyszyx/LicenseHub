@@ -65,6 +65,11 @@ async function initializeReferral() {
   registrationEnabled.value = Boolean(settings.registration_enabled)
   distributionEnabled.value = Boolean(settings.distribution?.enabled)
   const storageKey = 'licensehub_referral'
+  if (authStore.isAuthenticated) {
+    localStorage.removeItem(storageKey)
+    referralCode.value = ''
+    return
+  }
   if (!settings.distribution?.enabled) {
     localStorage.removeItem(storageKey)
     referralCode.value = ''

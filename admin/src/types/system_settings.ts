@@ -18,6 +18,7 @@ export interface EmailSettings {
 
 export interface DistributionSettings {
   enabled: boolean
+  referrer_binding_enabled: boolean
   default_rate_bps: number
   attribution_days: number
   holding_days: number
@@ -36,6 +37,7 @@ export interface SaveSystemSettingsReq {
   storefront_title: string
   registration_enabled: boolean
   distribution_enabled: boolean
+  distribution_referrer_binding_enabled: boolean
   distribution_default_rate_bps: number
   distribution_attribution_days: number
   distribution_holding_days: number

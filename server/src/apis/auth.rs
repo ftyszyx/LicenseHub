@@ -1,6 +1,6 @@
 use crate::apis::auth_middleware::Claims;
 use crate::apis::email_verification_handler::{normalize_email, token_hash};
-use crate::apis::system_settings_handler::get_registration_enabled;
+use crate::apis::system_settings_handler::{get_distribution_settings, get_registration_enabled};
 use crate::core::app::AppState;
 use crate::core::constants;
 use crate::core::my_error::AppError;
@@ -33,6 +33,8 @@ pub struct RegisterPayload {
     pub email: String,
     pub password: String,
     pub verification_token: String,
+    #[serde(default)]
+    pub referral_code: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -61,6 +63,16 @@ pub async fn register(
     let username = normalize_username(&json.username)?;
     validate_password(&json.password)?;
     let email = normalize_email(&json.email)?;
+    let distribution = get_distribution_settings(state).await?;
+    let requested_referral_code = (distribution.enabled && distribution.referrer_binding_enabled)
+        .then(|| {
+            json.referral_code
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && value.len() <= 32)
+                .map(str::to_ascii_uppercase)
+        })
+        .flatten();
     let verification_token_hash = token_hash(json.verification_token.trim());
     let password = bcrypt::hash(json.password.clone(), 10)?;
     let tx = state.db.begin().await?;
@@ -104,6 +116,15 @@ pub async fn register(
     if user_exists.is_some() {
         return Err(AppError::user_already_exists());
     }
+    let referrer = if let Some(referral_code) = requested_referral_code {
+        users::Entity::find()
+            .filter(users::Column::ReferralCode.eq(referral_code))
+            .lock_shared()
+            .one(&tx)
+            .await?
+    } else {
+        None
+    };
     let user_role = roles::Entity::find()
         .filter(roles::Column::Name.eq(constants::USER_ROLE))
         .one(&tx)
@@ -116,6 +137,9 @@ pub async fn register(
         email: Set(Some(email.clone())),
         email_verified_at: Set(Some(now)),
         referral_code: Set(crate::apis::user_handler::new_referral_code()),
+        referrer_user_id: Set(referrer.as_ref().map(|user| user.id)),
+        referrer_bound_at: Set(referrer.as_ref().map(|_| now)),
+        registered_referral_code: Set(referrer.as_ref().map(|user| user.referral_code.clone())),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()

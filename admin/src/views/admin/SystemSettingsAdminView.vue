@@ -63,6 +63,13 @@
         <el-form-item label="开放分销功能">
           <el-switch v-model="form.distribution_enabled" />
         </el-form-item>
+        <el-form-item label="永久邀请绑定">
+          <el-switch
+            v-model="form.distribution_referrer_binding_enabled"
+            :disabled="!form.distribution_enabled"
+          />
+          <span class="ml-2 text-sm text-gray-500">仅影响新用户注册，关闭不会解除已有邀请关系</span>
+        </el-form-item>
         <el-form-item label="默认佣金比例">
           <el-input-number v-model="form.distribution_default_rate_percent" :min="0" :max="100" :precision="2" />
           <span class="ml-2 text-sm text-gray-500">%</span>
@@ -213,6 +220,7 @@ const form = reactive<SettingsForm>({
   storefront_title: 'LicenseHub',
   registration_enabled: false,
   distribution_enabled: false,
+  distribution_referrer_binding_enabled: false,
   distribution_default_rate_bps: 2000,
   distribution_attribution_days: 30,
   distribution_holding_days: 7,
@@ -257,6 +265,7 @@ function assignSettings(data: SiteSettings) {
   form.storefront_title = data.storefront_title || 'LicenseHub'
   form.registration_enabled = Boolean(data.registration_enabled)
   form.distribution_enabled = Boolean(data.distribution?.enabled)
+  form.distribution_referrer_binding_enabled = Boolean(data.distribution?.referrer_binding_enabled)
   form.distribution_default_rate_bps = data.distribution?.default_rate_bps ?? 2000
   form.distribution_attribution_days = data.distribution?.attribution_days ?? 30
   form.distribution_holding_days = data.distribution?.holding_days ?? 7
@@ -291,6 +300,7 @@ async function submit() {
       storefront_title: form.storefront_title.trim(),
       registration_enabled: form.registration_enabled,
       distribution_enabled: form.distribution_enabled,
+      distribution_referrer_binding_enabled: form.distribution_referrer_binding_enabled,
       distribution_default_rate_bps: Math.round(form.distribution_default_rate_percent * 100),
       distribution_attribution_days: form.distribution_attribution_days,
       distribution_holding_days: form.distribution_holding_days,

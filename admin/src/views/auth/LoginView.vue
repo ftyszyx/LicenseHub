@@ -82,6 +82,7 @@ const togglePasswordVisibility = () => {
 
 const handleLogin = async () => {
     await authStore.login({username: username.value, password: password.value})
+    localStorage.removeItem('licensehub_referral')
     const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
       ? route.query.redirect
       : null

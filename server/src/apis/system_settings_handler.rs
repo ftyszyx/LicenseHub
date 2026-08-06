@@ -16,6 +16,7 @@ const STOREFRONT_TITLE_KEY: &str = "storefront_title";
 pub const LICENSE_SIGNING_PRIVATE_KEY_KEY: &str = "license_signing_private_key_b64";
 const DEFAULT_STOREFRONT_TITLE: &str = "LicenseHub";
 pub const DISTRIBUTION_ENABLED_KEY: &str = "distribution_enabled";
+pub const DISTRIBUTION_REFERRER_BINDING_ENABLED_KEY: &str = "distribution_referrer_binding_enabled";
 pub const DISTRIBUTION_DEFAULT_RATE_BPS_KEY: &str = "distribution_default_rate_bps";
 pub const DISTRIBUTION_ATTRIBUTION_DAYS_KEY: &str = "distribution_attribution_days";
 pub const DISTRIBUTION_HOLDING_DAYS_KEY: &str = "distribution_holding_days";
@@ -53,6 +54,7 @@ pub struct EmailSettingsInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistributionSettingsInfo {
     pub enabled: bool,
+    pub referrer_binding_enabled: bool,
     pub default_rate_bps: i32,
     pub attribution_days: i32,
     pub holding_days: i32,
@@ -76,6 +78,7 @@ pub struct UpdateSystemSettingsReq {
     pub storefront_title: String,
     pub registration_enabled: Option<bool>,
     pub distribution_enabled: Option<bool>,
+    pub distribution_referrer_binding_enabled: Option<bool>,
     pub distribution_default_rate_bps: Option<i32>,
     pub distribution_attribution_days: Option<i32>,
     pub distribution_holding_days: Option<i32>,
@@ -199,6 +202,9 @@ pub async fn update_system_settings_impl(
     if let Some(value) = req.distribution_enabled {
         updates.push((DISTRIBUTION_ENABLED_KEY, value.to_string()));
     }
+    if let Some(value) = req.distribution_referrer_binding_enabled {
+        updates.push((DISTRIBUTION_REFERRER_BINDING_ENABLED_KEY, value.to_string()));
+    }
     if let Some(value) = req.distribution_default_rate_bps {
         validate_range("distribution_default_rate_bps", value, 0, 10000)?;
         updates.push((DISTRIBUTION_DEFAULT_RATE_BPS_KEY, value.to_string()));
@@ -270,6 +276,12 @@ pub async fn get_distribution_settings(
 ) -> Result<DistributionSettingsInfo, AppError> {
     Ok(DistributionSettingsInfo {
         enabled: setting_bool(state, DISTRIBUTION_ENABLED_KEY, false).await?,
+        referrer_binding_enabled: setting_bool(
+            state,
+            DISTRIBUTION_REFERRER_BINDING_ENABLED_KEY,
+            false,
+        )
+        .await?,
         default_rate_bps: setting_i32(state, DISTRIBUTION_DEFAULT_RATE_BPS_KEY, 2000).await?,
         attribution_days: setting_i32(state, DISTRIBUTION_ATTRIBUTION_DAYS_KEY, 30).await?,
         holding_days: setting_i32(state, DISTRIBUTION_HOLDING_DAYS_KEY, 7).await?,

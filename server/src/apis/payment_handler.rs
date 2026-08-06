@@ -943,43 +943,51 @@ pub async fn create_order_impl(
             .one(&state.db)
             .await?
             .ok_or_else(|| AppError::auth_failed("用户不存在"))?;
-        (Some(user.id), user.email)
+        (Some(user.id), user.email, user.referrer_user_id)
     } else {
         let email = req
             .buyer_email
             .as_deref()
             .ok_or_else(|| AppError::business_logic("BUYER_EMAIL_REQUIRED", "游客购买需要填写邮箱"))
             .and_then(normalize_email)?;
-        (None, Some(email))
+        (None, Some(email), None)
     };
 
     let now = Utc::now().fixed_offset();
     let order_no = new_order_no();
     let distribution = get_distribution_settings(state).await?;
     let attribution = if distribution.enabled {
-        if let Some(code) = req
-            .referral_code
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            users::Entity::find()
-                .filter(users::Column::ReferralCode.eq(code.to_ascii_uppercase()))
+        let referrer = if let Some(referrer_user_id) = buyer.2 {
+            users::Entity::find_by_id(referrer_user_id)
                 .one(&state.db)
                 .await?
-                .and_then(|user| {
-                    if Some(user.id) == buyer.0 {
-                        return None;
-                    }
-                    let rate = user
-                        .commission_rate_bps
-                        .unwrap_or(distribution.default_rate_bps);
-                    let amount = ((plan.price_cents as i64 * rate as i64) / 10000) as i32;
-                    Some((user.id, user.referral_code, rate, amount))
-                })
+        } else if buyer.0.is_none() {
+            if let Some(code) = req
+                .referral_code
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                users::Entity::find()
+                    .filter(users::Column::ReferralCode.eq(code.to_ascii_uppercase()))
+                    .one(&state.db)
+                    .await?
+            } else {
+                None
+            }
         } else {
             None
-        }
+        };
+        referrer.and_then(|user| {
+            if Some(user.id) == buyer.0 {
+                return None;
+            }
+            let rate = user
+                .commission_rate_bps
+                .unwrap_or(distribution.default_rate_bps);
+            let amount = ((plan.price_cents as i64 * rate as i64) / 10000) as i32;
+            Some((user.id, user.referral_code, rate, amount))
+        })
     } else {
         None
     };

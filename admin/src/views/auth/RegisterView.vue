@@ -25,6 +25,9 @@
       </el-result>
 
       <el-form v-else :model="form" label-position="top" @submit.prevent="handleRegister">
+        <p v-if="referralCode" class="mb-4 text-sm text-emerald-700">
+          检测到推广链接，注册成功后将绑定邀请关系。
+        </p>
         <el-form-item label="用户名">
           <el-input v-model="form.username" maxlength="64" autocomplete="username" placeholder="3-64 位字母、数字或 _ - ." />
         </el-form-item>
@@ -80,8 +83,10 @@ const sendingCode = ref(false)
 const submitting = ref(false)
 const challengeId = ref('')
 const verifiedEmail = ref('')
+const referralCode = ref('')
 const cooldown = ref(0)
 let cooldownTimer: number | undefined
+const referralStorageKey = 'licensehub_referral'
 
 function validEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
@@ -92,6 +97,29 @@ function resetEmailVerification() {
     challengeId.value = ''
     form.emailCode = ''
   }
+}
+
+function loadReferralCode(attributionDays: number) {
+  const queryCode = typeof route.query.ref === 'string'
+    ? route.query.ref.trim().toUpperCase()
+    : ''
+  if (queryCode && queryCode.length <= 32) {
+    const expiresAt = Date.now() + attributionDays * 86400000
+    localStorage.setItem(referralStorageKey, JSON.stringify({ code: queryCode, expiresAt }))
+    referralCode.value = queryCode
+    return
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(referralStorageKey) || 'null')
+    if (saved?.code && saved?.expiresAt > Date.now()) {
+      referralCode.value = String(saved.code).trim().toUpperCase()
+      return
+    }
+  } catch {
+    // Invalid browser state is treated as no referral.
+  }
+  localStorage.removeItem(referralStorageKey)
+  referralCode.value = ''
 }
 
 async function sendEmailCode() {
@@ -148,7 +176,9 @@ async function handleRegister() {
       email: form.email.trim(),
       password: form.password,
       verification_token: verified.verification_token,
+      referral_code: referralCode.value || undefined,
     })
+    localStorage.removeItem(referralStorageKey)
     ElMessage.success('注册成功')
     const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
       ? route.query.redirect
@@ -163,7 +193,13 @@ onMounted(async () => {
   const email = typeof route.query.email === 'string' ? route.query.email : ''
   if (email) form.email = email
   try {
-    registrationEnabled.value = Boolean((await fetchSiteSettings()).registration_enabled)
+    const settings = await fetchSiteSettings()
+    registrationEnabled.value = Boolean(settings.registration_enabled)
+    if (settings.distribution?.enabled && settings.distribution.referrer_binding_enabled) {
+      loadReferralCode(settings.distribution.attribution_days)
+    } else {
+      localStorage.removeItem(referralStorageKey)
+    }
   } finally {
     settingsLoading.value = false
   }
