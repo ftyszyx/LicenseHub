@@ -30,6 +30,7 @@ async fn test_create_app() {
     let create_app_body = json!({
         "name": format!("TestApp_{}", chrono::Utc::now().timestamp()),
         "app_id": format!("com.test.app_{}", chrono::Utc::now().timestamp()),
+        "website_url": "  https://example.com/product  ",
         "app_vername": "1.0.0",
         "app_vercode": 1,
         "app_download_url": "https://example.com/download",
@@ -54,6 +55,10 @@ async fn test_create_app() {
     assert!(bodyjson["success"].as_bool().unwrap());
     assert!(bodyjson["data"]["id"].is_number());
     assert!(bodyjson["data"]["name"].is_string());
+    assert_eq!(
+        bodyjson["data"]["website_url"].as_str().unwrap(),
+        "https://example.com/product"
+    );
     assert_eq!(
         bodyjson["data"]["manifest_extra"]["channel"]
             .as_str()
@@ -119,6 +124,7 @@ async fn test_update_app() {
     let create_app_body = json!({
         "name": format!("UpdateApp_{}", chrono::Utc::now().timestamp()),
         "app_id": format!("com.update.app_{}", chrono::Utc::now().timestamp()),
+        "website_url": "https://example.com",
         "app_vername": "1.0.0",
         "app_vercode": 1,
         "app_download_url": "https://example.com/download",
@@ -154,6 +160,43 @@ async fn test_update_app() {
     let bodyjson = helpers::print_response_body_get_json(response, "update_app").await;
     assert!(bodyjson["success"].as_bool().unwrap());
     assert_eq!(bodyjson["data"]["id"].as_i64().unwrap(), app_id);
+
+    let response = TestClient::put(helpers::get_url(&format!("/api/admin/apps/{}", app_id)))
+        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({ "website_url": "" }))
+        .send(&app)
+        .await;
+    let bodyjson = helpers::print_response_body_get_json(response, "clear_app_website").await;
+    assert!(bodyjson["success"].as_bool().unwrap());
+    assert!(bodyjson["data"]["website_url"].is_null());
+}
+
+#[tokio::test]
+async fn test_reject_invalid_app_website_url() {
+    let _lock = helpers::db_lock().await;
+    let app = helpers::create_test_app().await;
+    let token = helpers::login_admin(&app).await;
+    let body = json!({
+        "name": format!("InvalidWebsiteApp_{}", chrono::Utc::now().timestamp()),
+        "app_id": format!("com.invalid.website.app_{}", chrono::Utc::now().timestamp()),
+        "website_url": "javascript:alert(1)",
+        "app_vername": "1.0.0",
+        "app_vercode": 1,
+        "app_download_url": "https://example.com/download",
+        "app_res_url": "https://example.com/resources",
+        "sort_order": 1,
+        "status": 1
+    });
+
+    let response = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&body)
+        .send(&app)
+        .await;
+    let bodyjson = helpers::print_response_body_get_json(response, "invalid_app_website").await;
+    assert!(!bodyjson["success"].as_bool().unwrap());
 }
 
 #[tokio::test]

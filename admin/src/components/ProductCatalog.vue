@@ -37,12 +37,15 @@ const authStore = useAuthStore()
 type AppPlanGroup = {
   appId: number
   appName: string
+  appWebsiteUrl: string | null
   plans: LicensePlan[]
 }
 
 const plans = ref<LicensePlan[]>([])
 const catalogState = ref<PublicPlansState>('available')
 const catalogAppName = ref<string | null>(null)
+const catalogWebsiteUrl = ref<string | null>(null)
+const groupedWebsiteUrls = ref<Record<number, string | null>>({})
 const loading = ref(false)
 const creatingId = ref<number | null>(null)
 const selectedPlan = ref<LicensePlan | null>(null)
@@ -102,6 +105,7 @@ const appGroups = computed<AppPlanGroup[]>(() => {
     groups.set(plan.app_id, {
       appId: plan.app_id,
       appName: plan.app_name || `App #${plan.app_id}`,
+      appWebsiteUrl: plan.app_website_url || null,
       plans: [plan],
     })
   }
@@ -111,6 +115,12 @@ const appGroups = computed<AppPlanGroup[]>(() => {
 const activeGroup = computed(() => {
   if (!props.grouped) return null
   return appGroups.value.find(group => String(group.appId) === activeAppKey.value) || null
+})
+
+const activeGroupWebsiteUrl = computed(() => {
+  const group = activeGroup.value
+  if (!group) return null
+  return group.appWebsiteUrl || groupedWebsiteUrls.value[group.appId] || null
 })
 
 const visiblePlans = computed(() => {
@@ -204,10 +214,29 @@ async function loadPlans() {
     const result: PublicPlansInfo = await fetchPublicPlans(props.appId ? { app_id: props.appId } : {})
     catalogState.value = result.state
     catalogAppName.value = result.app_name || null
+    catalogWebsiteUrl.value = result.app_website_url || null
     plans.value = result.plans
     await restoreCheckoutIntent()
   } finally {
     loading.value = false
+  }
+}
+
+async function loadGroupedWebsite(group: AppPlanGroup | null) {
+  if (!props.grouped || !group || group.appWebsiteUrl) return
+  if (Object.prototype.hasOwnProperty.call(groupedWebsiteUrls.value, group.appId)) return
+
+  try {
+    const result = await fetchPublicPlans({ app_id: group.appId })
+    groupedWebsiteUrls.value = {
+      ...groupedWebsiteUrls.value,
+      [group.appId]: result.app_website_url || null,
+    }
+  } catch {
+    groupedWebsiteUrls.value = {
+      ...groupedWebsiteUrls.value,
+      [group.appId]: null,
+    }
   }
 }
 
@@ -399,6 +428,10 @@ function payMethodsMessage(info: PayMethodsInfo | null) {
 watch(() => props.appId, loadPlans, { immediate: true })
 void initializeReferral()
 
+watch(activeGroup, (group) => {
+  void loadGroupedWebsite(group)
+}, { immediate: true })
+
 watch(activeQrCode, async (code) => {
   if (!code) {
     activeQrCodeDataUrl.value = ''
@@ -441,6 +474,27 @@ onBeforeUnmount(stopPolling)
           </div>
         </div>
 
+        <div
+          v-if="appId && catalogAppName"
+          class="mb-6 border-b border-slate-200 bg-white px-5 py-4"
+        >
+          <div class="text-xs font-medium text-slate-500">{{ $t('products_page.current_app') }}</div>
+          <div class="mt-1 flex flex-wrap items-center gap-3">
+            <h1 class="min-w-0 text-2xl font-semibold text-slate-950">{{ catalogAppName }}</h1>
+            <el-button
+              v-if="catalogWebsiteUrl"
+              tag="a"
+              type="primary"
+              :href="catalogWebsiteUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span>{{ $t('products_page.visit_website') }}</span>
+              <el-icon class="el-icon--right"><TopRight /></el-icon>
+            </el-button>
+          </div>
+        </div>
+
         <div v-if="grouped && appGroups.length" class="mb-6">
           <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div class="flex gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1">
@@ -461,6 +515,17 @@ onBeforeUnmount(stopPolling)
                 </span>
               </button>
             </div>
+            <el-button
+              v-if="activeGroupWebsiteUrl"
+              tag="a"
+              type="primary"
+              :href="activeGroupWebsiteUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span>{{ $t('products_page.visit_website') }}</span>
+              <el-icon class="el-icon--right"><TopRight /></el-icon>
+            </el-button>
           </div>
         </div>
 

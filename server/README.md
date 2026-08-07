@@ -34,14 +34,14 @@ cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features
 数据库迁移
 
 ```bash
-sqlx migrate run --database-url postgres://test:123456@localhost:5432/hub
+sqlx migrate run --database-url postgres://test:123456@localhost:15432/hub
 ```
 
 清除
 
 ```
-sqlx migrate revert --database-url postgres://test:123456@localhost:5432/hub
-sqlx migrate revert --target-version 0 --database-url postgres://test:123456@localhost:5432/hub
+sqlx migrate revert --database-url postgres://test:123456@localhost:15432/hub
+sqlx migrate revert --target-version 0 --database-url postgres://test:123456@localhost:15432/hub
 
 ```
 

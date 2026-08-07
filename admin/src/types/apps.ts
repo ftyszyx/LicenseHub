@@ -4,6 +4,7 @@ export interface AppModel {
     id: number
     name: string
     app_id: string
+    website_url?: string | null
     app_vername: string
     app_vercode: number
     app_download_url: string
@@ -31,6 +32,7 @@ export type ListAppsParams = {
 export interface AddAppReq {
     name: string
     app_id: string
+    website_url?: string | null
     app_vername: string
     app_vercode: number
     app_download_url: string
@@ -57,6 +59,7 @@ export interface AppManifestUrl {
 export interface UpdateAppReq {
     name?: string
     app_id?: string
+    website_url?: string | null
     app_vername?: string
     app_vercode?: number
     app_download_url?: string

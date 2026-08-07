@@ -64,13 +64,16 @@
         <el-table-column :label="$t('apps.links')" min-width="160">
           <template #default="{ row }">
             <div class="flex flex-col items-start gap-1">
+              <el-link v-if="row.website_url" type="success" :href="row.website_url" target="_blank" rel="noopener noreferrer">
+                {{ $t('apps.website') }}
+              </el-link>
               <el-link v-if="row.app_download_url" type="primary" :href="row.app_download_url" target="_blank">
                 {{ $t('apps.download') }}
               </el-link>
               <el-link v-if="row.app_res_url" type="primary" :href="row.app_res_url" target="_blank">
                 {{ $t('apps.resource') }}
               </el-link>
-              <span v-if="!row.app_download_url && !row.app_res_url" class="text-gray-400">-</span>
+              <span v-if="!row.website_url && !row.app_download_url && !row.app_res_url" class="text-gray-400">-</span>
             </div>
           </template>
         </el-table-column>
@@ -157,6 +160,9 @@
                         <el-button @click="genAppId">{{ $t('common.generate') }}</el-button>
                       </template>
                     </el-input>
+                  </el-form-item>
+                  <el-form-item :label="$t('apps.website_url')" prop="website_url" class="col-span-2">
+                    <el-input v-model="form.website_url" placeholder="https://example.com" clearable />
                   </el-form-item>
                   <el-form-item :label="$t('apps.valid_key')" prop="app_valid_key" class="col-span-2">
                     <el-input v-model="form.app_valid_key">
@@ -483,6 +489,7 @@ const appDialogTab = ref<AppDialogTab>('basic')
 const emptyForm: AddAppReq = {
   name: '',
   app_id: '',
+  website_url: '',
   app_vername: '1.0.0',
   app_vercode: 1,
   app_download_url: '',
@@ -506,11 +513,13 @@ const rules = reactive<FormRules<AddAppReq>>({
   app_valid_key: [{ required: true, message: t('apps.input_valid_key'), trigger: 'blur' }],
   app_vername: [{ required: true, message: t('apps.input_version_name'), trigger: 'blur' }],
   app_vercode: [{ required: true, message: t('apps.input_version_code'), trigger: 'blur' }],
+  website_url: [{ validator: validateWebsiteUrl, trigger: 'blur' }],
 })
 
 const appDialogFieldTabs: Record<string, AppDialogTab> = {
   name: 'basic',
   app_id: 'basic',
+  website_url: 'basic',
   app_valid_key: 'basic',
   app_vername: 'version',
   app_vercode: 'version',
@@ -688,6 +697,7 @@ const openEdit = (row: AppModel) => {
   Object.assign(form, {
     name: row.name,
     app_id: row.app_id,
+    website_url: row.website_url || '',
     app_vername: row.app_vername || '1.0.0',
     app_vercode: row.app_vercode || 1,
     app_download_url: row.app_download_url || '',
@@ -735,7 +745,11 @@ const submitForm = async (currentFormRef: FormInstance | undefined) => {
     return
   }
 
-  const payload: AddAppReq = { ...form, manifest_extra: manifestExtra }
+  const payload: AddAppReq = {
+    ...form,
+    website_url: form.website_url?.trim() || '',
+    manifest_extra: manifestExtra,
+  }
   if (dialog.mode === 'create') {
     await createApp(payload)
   } else if (dialog.editingId != null) {
@@ -744,6 +758,24 @@ const submitForm = async (currentFormRef: FormInstance | undefined) => {
   dialog.visible = false
   await reload()
   ElMessage.success(t('common.saved') as string)
+}
+
+function validateWebsiteUrl(_rule: unknown, value: string | null | undefined, callback: (error?: Error) => void) {
+  const websiteUrl = value?.trim()
+  if (!websiteUrl) {
+    callback()
+    return
+  }
+
+  try {
+    const parsed = new URL(websiteUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || websiteUrl.length > 2048) {
+      throw new Error('invalid website URL')
+    }
+    callback()
+  } catch {
+    callback(new Error(t('apps.input_valid_website_url') as string))
+  }
 }
 
 function genAppKey() {

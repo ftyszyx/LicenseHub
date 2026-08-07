@@ -22,6 +22,7 @@ export const fetchPublicPlans = async (params: { app_id?: number } = {}) => {
       state: 'available',
       app_id: params.app_id ?? null,
       app_name: null,
+      app_website_url: null,
       app_status: null,
       plans: response.data,
     } satisfies PublicPlansInfo

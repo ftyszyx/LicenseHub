@@ -1,0 +1,29 @@
+[     221ms] [LOG] i18n @ http://localhost:9070/src/utils/i18n.ts:3
+[     221ms] [LOG] {products_page: Object, home: Object, order_query: Object, common: Object, auth: Object} {app: Object, common: Object, auth: Object, menu: Object, dashboard: Object} @ http://localhost:9070/src/utils/i18n.ts:4
+[     221ms] [LOG] null @ http://localhost:9070/src/utils/i18n.ts:5
+[     224ms] [LOG] request /api @ http://localhost:9070/src/utils/request.ts?t=1786091616374:4
+[     270ms] [LOG] [request] get /api/products 
+Data: undefined 
+Params: {} @ http://localhost:9070/src/utils/log.ts:2
+[     270ms] [LOG] [request] get /api/site-settings 
+Data: undefined 
+Params: undefined @ http://localhost:9070/src/utils/log.ts:2
+[     270ms] [LOG] [request] get /api/site-settings 
+Data: undefined 
+Params: undefined @ http://localhost:9070/src/utils/log.ts:2
+[     280ms] [LOG] [response] get /api/products 
+Data: {"code":"[REDACTED]","message":"success","data":{"state":"available","app_id":null,"app_name":null,"app_website_url":null,"app_status":null,"plans":[{"id":1,"app_id":1,"app_name":"test","name":"ddd","description":"","price_cents":5,"code_type":0,"valid_days":30,"total_count":null,"status":1,"sort_order":0,"created_at":"2026-05-13T10:23:42.870946Z","updated_at":"2026-05-13T10:23:42.870946Z"},{"id":34,"app_id":35,"app_name":"test33","name":"dadfasdfa","description":"","price_cents":100,"code_type":0,"valid_days":30,"total_count":null,"status":1,"sort_order":0,"created_at":"2026-06-15T02:35:39.758293Z","updated_at":"2026-06-15T02:35:39.758293Z"}]},"success":true} @ http://localhost:9070/src/utils/log.ts:2
+[     281ms] [LOG] [request] get /api/products 
+Data: undefined 
+Params: {"app_id":1} @ http://localhost:9070/src/utils/log.ts:2
+[     587ms] [LOG] [response] get /api/site-settings 
+Data: {"code":"[REDACTED]","message":"success","data":{"storefront_title":"LicenseHub","registration_enabled":false,"distribution":{"enabled":true,"referrer_binding_enabled":false,"default_rate_bps":2000,"attribution_days":30,"holding_days":7,"min_withdraw_cents":5000},"license_signing":{"configured":true,"key_id":"license-v1","public_key_b64":"7KOZPzNfaNXiJMOkfRRgTXQQL3RhQC-OaszIwfcxsfM","updated_at":"2026-06-30T03:57:01.366612+00:00"}},"success":true} @ http://localhost:9070/src/utils/log.ts:2
+[     587ms] [LOG] [response] get /api/products 
+Data: {"code":"[REDACTED]","message":"success","data":{"state":"available","app_id":1,"app_name":"test","app_website_url":"https://www.google.com","app_status":1,"plans":[{"id":1,"app_id":1,"app_name":"test","name":"ddd","description":"","price_cents":5,"code_type":0,"valid_days":30,"total_count":null,"status":1,"sort_order":0,"created_at":"2026-05-13T10:23:42.870946Z","updated_at":"2026-05-13T10:23:42.870946Z"}]},"success":true} @ http://localhost:9070/src/utils/log.ts:2
+[     591ms] [LOG] [response] get /api/site-settings 
+Data: {"code":"[REDACTED]","message":"success","data":{"storefront_title":"LicenseHub","registration_enabled":false,"distribution":{"enabled":true,"referrer_binding_enabled":false,"default_rate_bps":2000,"attribution_days":30,"holding_days":7,"min_withdraw_cents":5000},"license_signing":{"configured":true,"key_id":"license-v1","public_key_b64":"7KOZPzNfaNXiJMOkfRRgTXQQL3RhQC-OaszIwfcxsfM","updated_at":"2026-06-30T03:57:01.366612+00:00"}},"success":true} @ http://localhost:9070/src/utils/log.ts:2
+[    8842ms] [LOG] [request] get /api/products 
+Data: undefined 
+Params: {"app_id":35} @ http://localhost:9070/src/utils/log.ts:2
+[    8851ms] [LOG] [response] get /api/products 
+Data: {"code":"[REDACTED]","message":"success","data":{"state":"available","app_id":35,"app_name":"test33","app_website_url":"https://www.baidu.com","app_status":1,"plans":[{"id":34,"app_id":35,"app_name":"test33","name":"dadfasdfa","description":"","price_cents":100,"code_type":0,"valid_days":30,"total_count":null,"status":1,"sort_order":0,"created_at":"2026-06-15T02:35:39.758293Z","updated_at":"2026-06-15T02:35:39.758293Z"}]},"success":true} @ http://localhost:9070/src/utils/log.ts:2

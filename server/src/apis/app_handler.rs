@@ -13,9 +13,11 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use url::Url;
 use validator::Validate;
 
 const LOG_STATUS_SUCCESS: i16 = 1;
+const MAX_WEBSITE_URL_LEN: usize = 2048;
 
 fn get_state(depot: &mut Depot) -> Result<&AppState, AppError> {
     depot
@@ -29,6 +31,7 @@ fn get_state(depot: &mut Depot) -> Result<&AppState, AppError> {
 pub struct AddAppReq {
     pub name: String,
     pub app_id: String,
+    pub website_url: Option<String>,
     pub app_vername: String,
     pub app_vercode: i32,
     pub app_download_url: String,
@@ -47,6 +50,7 @@ pub struct AddAppReq {
 pub struct UpdateAppReq {
     pub name: Option<String>,
     pub app_id: Option<String>,
+    pub website_url: Option<String>,
     pub app_vername: Option<String>,
     pub app_vercode: Option<i32>,
     pub app_download_url: Option<String>,
@@ -111,9 +115,11 @@ pub async fn add_impl(state: &AppState, req: AddAppReq) -> Result<apps::Model, A
     let code_type = normalize_code_type(req.code_type)?;
     let (trial_days, trial_num) = normalize_trial_limits(code_type, req.trial_days, req.trial_num);
     let manifest_extra = normalize_manifest_extra(req.manifest_extra)?;
+    let website_url = normalize_website_url(req.website_url)?;
     let active_model = apps::ActiveModel {
         name: Set(req.name),
         app_id: Set(req.app_id),
+        website_url: Set(website_url),
         app_vername: Set(req.app_vername),
         app_vercode: Set(req.app_vercode),
         app_download_url: Set(req.app_download_url),
@@ -165,6 +171,9 @@ pub async fn update_impl(
     if let Some(v) = req.app_id {
         app.app_id = Set(v);
     }
+    if let Some(v) = req.website_url {
+        app.website_url = Set(normalize_website_url(Some(v))?);
+    }
     if let Some(v) = req.app_vername {
         app.app_vername = Set(v);
     }
@@ -207,6 +216,31 @@ fn normalize_code_type(value: Option<i16>) -> Result<i16, AppError> {
         1 => Ok(1),
         _ => Err(AppError::validation("code_type must be 0 or 1")),
     }
+}
+
+fn normalize_website_url(value: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > MAX_WEBSITE_URL_LEN {
+        return Err(AppError::validation(format!(
+            "website_url must not exceed {MAX_WEBSITE_URL_LEN} characters"
+        )));
+    }
+
+    let parsed = Url::parse(value)
+        .map_err(|_| AppError::validation("website_url must be a valid HTTP or HTTPS URL"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(AppError::validation(
+            "website_url must be a valid HTTP or HTTPS URL",
+        ));
+    }
+
+    Ok(Some(value.to_string()))
 }
 
 fn normalize_trial_limits(

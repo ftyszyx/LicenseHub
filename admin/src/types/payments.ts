@@ -27,6 +27,7 @@ export interface LicensePlan {
   id: number
   app_id: number
   app_name?: string | null
+  app_website_url?: string | null
   name: string
   description?: string | null
   price_cents: number
@@ -45,6 +46,7 @@ export interface PublicPlansInfo {
   state: PublicPlansState
   app_id?: number | null
   app_name?: string | null
+  app_website_url?: string | null
   app_status?: number | null
   plans: LicensePlan[]
 }

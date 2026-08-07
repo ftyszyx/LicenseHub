@@ -194,6 +194,7 @@ pub struct PublicPlansInfo {
     pub state: PublicPlansState,
     pub app_id: Option<i32>,
     pub app_name: Option<String>,
+    pub app_website_url: Option<String>,
     pub app_status: Option<i16>,
     pub plans: Vec<PlanInfo>,
 }
@@ -203,6 +204,7 @@ pub struct PlanInfo {
     pub id: i32,
     pub app_id: i32,
     pub app_name: Option<String>,
+    pub app_website_url: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub price_cents: i32,
@@ -218,10 +220,13 @@ pub struct PlanInfo {
 impl From<(license_plans::Model, Option<apps::Model>)> for PlanInfo {
     fn from(value: (license_plans::Model, Option<apps::Model>)) -> Self {
         let (plan, app) = value;
+        let app_name = app.as_ref().map(|app| app.name.clone());
+        let app_website_url = app.and_then(|app| app.website_url);
         Self {
             id: plan.id,
             app_id: plan.app_id,
-            app_name: app.map(|a| a.name),
+            app_name,
+            app_website_url,
             name: plan.name,
             description: plan.description,
             price_cents: plan.price_cents,
@@ -480,6 +485,7 @@ pub async fn list_public_plans(
                     state: PublicPlansState::AppDisabled,
                     app_id: Some(app.id),
                     app_name: Some(app.name),
+                    app_website_url: app.website_url,
                     app_status: Some(app.status),
                     plans: Vec::new(),
                 }));
@@ -490,6 +496,7 @@ pub async fn list_public_plans(
                     state: PublicPlansState::AppNotFound,
                     app_id: Some(app_id),
                     app_name: None,
+                    app_website_url: None,
                     app_status: None,
                     plans: Vec::new(),
                 }));
@@ -511,6 +518,7 @@ pub async fn list_public_plans(
         state: PublicPlansState::Available,
         app_id: app.as_ref().map(|app| app.id),
         app_name: app.as_ref().map(|app| app.name.clone()),
+        app_website_url: app.as_ref().and_then(|app| app.website_url.clone()),
         app_status: app.as_ref().map(|app| app.status),
         plans: rows.into_iter().map(PlanInfo::from).collect(),
     }))

@@ -11,6 +11,7 @@ pub struct Model {
     pub name: String,
     #[sea_orm(unique)]
     pub app_id: String,
+    pub website_url: Option<String>,
     pub app_vername: String,
     pub app_vercode: i32,
     pub app_download_url: String,

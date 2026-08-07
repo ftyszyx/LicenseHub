@@ -738,6 +738,7 @@ async fn test_public_products_follow_configured_sort_order() {
     let create_app_body = json!({
         "name": helpers::unique_name("SortedPayApp"),
         "app_id": helpers::unique_name("com.sorted.pay.app"),
+        "website_url": "https://example.com/sorted-app",
         "app_vername": "1.0.0",
         "app_vercode": 1,
         "app_download_url": "https://example.com/dl",
@@ -783,6 +784,16 @@ async fn test_public_products_follow_configured_sort_order() {
         .send(&ctx.app)
         .await;
     let json = helpers::print_response_body_get_json(resp, "sorted_public_products").await;
+    assert_eq!(
+        json["data"]["app_website_url"].as_str().unwrap(),
+        "https://example.com/sorted-app"
+    );
+    assert_eq!(
+        json["data"]["plans"][0]["app_website_url"]
+            .as_str()
+            .unwrap(),
+        "https://example.com/sorted-app"
+    );
     let ids: Vec<i64> = json["data"]["plans"]
         .as_array()
         .unwrap()
@@ -790,6 +801,21 @@ async fn test_public_products_follow_configured_sort_order() {
         .map(|plan| plan["id"].as_i64().unwrap())
         .collect();
     assert_eq!(ids, vec![plan_ids[1], plan_ids[2], plan_ids[0]]);
+
+    let resp = TestClient::get(helpers::get_url("/api/products"))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "grouped_public_products").await;
+    let grouped_plan = json["data"]["plans"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|plan| plan["id"].as_i64() == Some(plan_ids[0]))
+        .unwrap();
+    assert_eq!(
+        grouped_plan["app_website_url"].as_str().unwrap(),
+        "https://example.com/sorted-app"
+    );
 
     let resp = TestClient::put(helpers::get_url(&format!(
         "/api/admin/plans/{}",
