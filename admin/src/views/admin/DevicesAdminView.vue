@@ -1,6 +1,6 @@
 <template>
-  <div class="space-y-4">
-    <el-card shadow="hover">
+  <div class="admin-list-page">
+    <el-card class="admin-list-fixed" shadow="hover">
       <div class="flex items-center gap-2">
         <el-input v-model="query.device_id" :placeholder="$t('devices.device_id')" clearable class="w-56" />
         <el-input v-model.number="query.app_id" :placeholder="$t('apps.app_id')" clearable class="w-40" />
@@ -9,8 +9,8 @@
       </div>
     </el-card>
 
-    <el-card shadow="never">
-      <el-table :data="rows" stripe size="large" style="width: 100%">
+    <el-card class="admin-list-panel" shadow="never">
+      <el-table class="admin-list-table" :data="rows" stripe size="large" height="100%">
         <el-table-column prop="id" :label="$t('common.id')" width="80" />
         <el-table-column :label="$t('devices.apptitle')" min-width="160">
           <template #default="{ row }">{{ row.app_name }} ({{ row.app_id }})</template>
@@ -24,7 +24,7 @@
         </el-table-column>
         <el-table-column prop="remaining" :label="$t('devices.remaining')" width="120" />
       </el-table>
-      <div class="flex justify-end mt-4">
+      <div class="admin-list-footer mt-4 flex justify-end">
         <el-pagination background layout="total, sizes, prev, pager, next, jumper" :page-sizes="[10, 20, 50, 100]" :page-size="pageSize" :current-page="page" :total="total" @current-change="handlePageChange" @size-change="handleSizeChange" />
       </div>
     </el-card>

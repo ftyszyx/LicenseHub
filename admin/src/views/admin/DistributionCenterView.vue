@@ -1,6 +1,6 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-between gap-4">
+  <div class="admin-list-page">
+    <div class="admin-list-fixed flex items-center justify-between gap-4">
       <div>
         <h2 class="text-xl font-semibold text-slate-950">推广中心</h2>
         <div class="mt-1 text-sm text-slate-500">佣金提现由管理员线下转账处理</div>
@@ -10,7 +10,7 @@
       </el-button>
     </div>
 
-    <section v-loading="loading" class="distribution-summary-grid overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <section v-loading="loading" class="admin-list-fixed distribution-summary-grid overflow-hidden rounded-lg border border-slate-200 bg-white">
       <div class="summary-item"><div class="summary-label">待确认佣金</div><div class="summary-value">¥{{ money(summary.pending_amount_cents) }}</div></div>
       <div class="summary-item"><div class="summary-label">可提现佣金</div><div class="summary-value text-emerald-700">¥{{ money(summary.available_amount_cents) }}</div></div>
       <div class="summary-item"><div class="summary-label">提现处理中</div><div class="summary-value">¥{{ money(summary.locked_amount_cents) }}</div></div>
@@ -19,12 +19,13 @@
 
     <el-alert
       v-if="summary.adjustment_debt_cents > 0"
+      class="admin-list-fixed"
       type="warning"
       :closable="false"
       :title="`退款佣金待抵扣 ¥${money(summary.adjustment_debt_cents)}，后续可结算佣金会优先抵扣`"
     />
 
-    <section class="rounded-lg border border-slate-200 bg-white p-4">
+    <section class="admin-list-fixed rounded-lg border border-slate-200 bg-white p-4">
       <el-form label-width="90px">
         <el-form-item label="推广链接">
           <el-input :model-value="promotionLink" readonly>
@@ -39,10 +40,10 @@
       </el-form>
     </section>
 
-    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <el-tabs v-model="activeTab" class="distribution-tabs">
+    <section class="admin-list-panel rounded-lg border border-slate-200 bg-white">
+      <el-tabs v-model="activeTab" class="admin-list-tabs distribution-tabs">
         <el-tab-pane label="佣金明细" name="commissions">
-          <el-table :data="commissions">
+          <el-table class="admin-list-table" :data="commissions" height="100%">
             <el-table-column prop="order_no" label="订单号" min-width="190" />
             <el-table-column label="订单金额" width="120"><template #default="{ row }">¥{{ money(row.order_amount_cents) }}</template></el-table-column>
             <el-table-column label="佣金" width="110"><template #default="{ row }">¥{{ money(row.commission_amount_cents) }}</template></el-table-column>
@@ -54,7 +55,7 @@
         </el-tab-pane>
 
         <el-tab-pane label="提现记录" name="settlements">
-          <el-table :data="settlements">
+          <el-table class="admin-list-table" :data="settlements" height="100%">
             <el-table-column prop="settlement_no" label="提现单号" min-width="210" />
             <el-table-column label="金额" width="120"><template #default="{ row }">¥{{ money(row.amount_cents) }}</template></el-table-column>
             <el-table-column label="支付宝账户" min-width="180"><template #default="{ row }">{{ row.settlement_account.account }}</template></el-table-column>
@@ -71,7 +72,7 @@
         </el-tab-pane>
 
         <el-tab-pane label="退款抵扣" name="adjustments">
-          <el-table :data="adjustments" empty-text="暂无退款抵扣记录">
+          <el-table class="admin-list-table" :data="adjustments" empty-text="暂无退款抵扣记录" height="100%">
             <el-table-column prop="order_no" label="退款订单" min-width="190" />
             <el-table-column label="冲正金额" width="120"><template #default="{ row }">¥{{ money(-row.amount_cents) }}</template></el-table-column>
             <el-table-column label="已抵扣" width="120"><template #default="{ row }">¥{{ money(row.offset_amount_cents) }}</template></el-table-column>

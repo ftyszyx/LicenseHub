@@ -1,6 +1,6 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-between gap-4">
+  <div class="admin-list-page">
+    <div class="admin-list-fixed flex items-center justify-between gap-4">
       <div>
         <h2 class="text-xl font-semibold text-slate-950">佣金与提现</h2>
         <div class="mt-1 text-sm text-slate-500">审核用户提现申请并登记线下转账凭证</div>
@@ -8,10 +8,10 @@
       <el-button :icon="Refresh" @click="loadActive">刷新</el-button>
     </div>
 
-    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <el-tabs v-model="activeTab" class="distribution-tabs" @tab-change="loadActive">
+    <section class="admin-list-panel rounded-lg border border-slate-200 bg-white">
+      <el-tabs v-model="activeTab" class="admin-list-tabs distribution-tabs" @tab-change="loadActive">
         <el-tab-pane label="佣金明细" name="commissions">
-          <el-table v-loading="loading" :data="commissions">
+          <el-table class="admin-list-table" v-loading="loading" :data="commissions" height="100%">
             <el-table-column prop="id" label="ID" width="90" />
             <el-table-column prop="username" label="推广用户" min-width="140" />
             <el-table-column prop="order_no" label="订单号" min-width="190" />
@@ -25,14 +25,14 @@
         </el-tab-pane>
 
         <el-tab-pane label="提现申请" name="settlements">
-          <div class="flex items-center gap-3 border-b border-slate-100 p-3">
+          <div class="admin-list-fixed flex items-center gap-3 border-b border-slate-100 p-3">
             <el-select v-model="settlementStatus" clearable placeholder="全部状态" class="w-36" @change="loadSettlements">
               <el-option label="待处理" :value="SettlementStatus.Pending" />
               <el-option label="已打款" :value="SettlementStatus.Paid" />
               <el-option label="已拒绝" :value="SettlementStatus.Rejected" />
             </el-select>
           </div>
-          <el-table v-loading="loading" :data="settlements">
+          <el-table class="admin-list-table" v-loading="loading" :data="settlements" height="100%">
             <el-table-column prop="settlement_no" label="提现单号" min-width="210" />
             <el-table-column prop="username" label="用户" min-width="120" />
             <el-table-column label="金额" width="120"><template #default="{ row }"><strong>¥{{ money(row.amount_cents) }}</strong></template></el-table-column>
@@ -54,7 +54,7 @@
         </el-tab-pane>
 
         <el-tab-pane label="退款冲正" name="adjustments">
-          <el-table v-loading="loading" :data="adjustments" empty-text="暂无退款冲正记录">
+          <el-table class="admin-list-table" v-loading="loading" :data="adjustments" empty-text="暂无退款冲正记录" height="100%">
             <el-table-column prop="id" label="ID" width="90" />
             <el-table-column prop="username" label="用户" min-width="130" />
             <el-table-column prop="order_no" label="退款订单" min-width="190" />
@@ -67,7 +67,7 @@
         </el-tab-pane>
       </el-tabs>
 
-      <div class="flex justify-end border-t border-slate-100 p-3">
+      <div class="admin-list-footer flex justify-end border-t border-slate-100 p-3">
         <el-pagination background layout="total, prev, pager, next" :current-page="page" :page-size="pageSize" :total="total" @current-change="changePage" />
       </div>
     </section>

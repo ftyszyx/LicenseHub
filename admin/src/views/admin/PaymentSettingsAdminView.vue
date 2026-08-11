@@ -1,6 +1,6 @@
 <template>
-  <div class="space-y-4">
-    <el-card shadow="hover">
+  <div class="admin-list-page">
+    <el-card class="admin-list-fixed" shadow="hover">
       <div class="flex items-center justify-between gap-3">
         <h2 class="text-xl font-semibold">{{ $t('payment_settings.title') }}</h2>
         <div class="flex items-center gap-2">
@@ -19,8 +19,8 @@
       </div>
     </el-card>
 
-    <el-card shadow="never">
-      <el-table v-loading="loading" :data="rows" stripe size="large" style="width: 100%">
+    <el-card class="admin-list-panel" shadow="never">
+      <el-table class="admin-list-table" v-loading="loading" :data="rows" stripe size="large" height="100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" :label="$t('payment_settings.name')" min-width="170" />
         <el-table-column :label="$t('payment_settings.provider')" width="120">
@@ -47,7 +47,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="mt-4 flex justify-end">
+      <div class="admin-list-footer mt-4 flex justify-end">
         <el-pagination
           background
           layout="total, sizes, prev, pager, next, jumper"

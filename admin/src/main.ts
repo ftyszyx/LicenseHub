@@ -1,4 +1,5 @@
 import './assets/main_output.css'
+import './assets/admin-list-layout.css'
 import 'vuefinder/dist/style.css'
 
 import { createApp } from 'vue'

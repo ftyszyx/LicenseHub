@@ -3,8 +3,8 @@
     <aside class="flex w-60 flex-col border-r border-slate-200 bg-white">
       <UserSidebarMenu class="flex-1" />
     </aside>
-    <main class="flex-1 overflow-auto p-6">
-      <div class="mb-4 flex items-center justify-end gap-3">
+    <main class="user-main p-6">
+      <div class="user-toolbar mb-4 flex items-center justify-end gap-3">
         <el-dropdown @command="onLangCommand">
           <el-button text>{{ currentLocaleLabel }}</el-button>
           <template #dropdown>
@@ -24,7 +24,9 @@
           </template>
         </el-dropdown>
       </div>
-      <RouterView />
+      <div class="user-content">
+        <RouterView />
+      </div>
     </main>
 
     <el-dialog v-model="pwdVisible" :title="$t('auth.change_password')" width="420px">
@@ -87,3 +89,23 @@ function onSettingsCommand(command: string) {
   }
 }
 </script>
+
+<style scoped>
+.user-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.user-toolbar {
+  flex: none;
+}
+
+.user-content {
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: auto;
+}
+</style>

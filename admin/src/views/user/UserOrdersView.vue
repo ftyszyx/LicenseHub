@@ -1,6 +1,6 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+  <div class="admin-list-page">
+    <div class="admin-list-fixed flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="text-xl font-semibold text-slate-950">我的订单</h2>
         <p class="mt-1 text-sm text-slate-500">查看登录账号购买或通过验证邮箱认领的订单与注册码。</p>
@@ -8,8 +8,8 @@
       <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
     </div>
 
-    <section class="rounded-lg border border-slate-200 bg-white p-4">
-      <div class="mb-4 flex flex-wrap gap-3">
+    <section class="admin-list-panel rounded-lg border border-slate-200 bg-white p-4">
+      <div class="admin-list-fixed mb-4 flex flex-wrap gap-3">
         <el-input v-model="filters.order_no" clearable placeholder="订单号" class="!w-64" @keyup.enter="search" />
         <el-select v-model="filters.status" clearable placeholder="全部状态" class="!w-36" @change="search">
           <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -17,7 +17,7 @@
         <el-button type="primary" :icon="Search" @click="search">查询</el-button>
       </div>
 
-      <el-table v-loading="loading" :data="orders" row-key="id" empty-text="暂无订单">
+      <el-table class="admin-list-table" v-loading="loading" :data="orders" row-key="id" empty-text="暂无订单" height="100%">
         <el-table-column prop="order_no" label="订单号" min-width="190">
           <template #default="{ row }"><span class="font-mono text-xs">{{ row.order_no }}</span></template>
         </el-table-column>
@@ -43,7 +43,7 @@
         </el-table-column>
       </el-table>
 
-      <div class="mt-4 flex justify-end">
+      <div class="admin-list-footer mt-4 flex justify-end">
         <el-pagination
           v-model:current-page="page"
           :page-size="pageSize"

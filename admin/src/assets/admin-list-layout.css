@@ -1,0 +1,61 @@
+.admin-list-page {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1rem;
+  overflow: hidden;
+}
+
+.admin-list-fixed,
+.admin-list-footer {
+  flex: none;
+}
+
+.admin-list-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-list-panel.el-card > .el-card__body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-list-table {
+  min-height: 0;
+  flex: 1 1 0%;
+  width: 100%;
+}
+
+.admin-list-tabs {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-list-tabs > .el-tabs__header {
+  flex: none;
+}
+
+.admin-list-tabs > .el-tabs__content {
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.admin-list-tabs > .el-tabs__content > .el-tab-pane {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
