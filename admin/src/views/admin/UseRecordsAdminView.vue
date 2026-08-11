@@ -55,6 +55,7 @@ import { fetchApps } from '@/apis/apps'
 import { fetchUseRecords } from '@/apis/use_records'
 import type { ListUseRecordsParams, UseRecordModel } from '@/types/use_records'
 import { formatTime } from '@/utils'
+import { fetchAllPages } from '@/utils/pagination'
 
 const rows = ref<UseRecordModel[]>([])
 const appOptions = ref<{ id: number; name: string }[]>([])
@@ -102,8 +103,8 @@ function handleSizeChange(value: number) {
 }
 
 async function loadApps() {
-  const data = await fetchApps({ page: 1, page_size: 1000 })
-  appOptions.value = data.list.map((item: any) => ({ id: item.id, name: item.name }))
+  const apps = await fetchAllPages(fetchApps)
+  appOptions.value = apps.map(item => ({ id: item.id, name: item.name }))
 }
 
 onMounted(async () => {

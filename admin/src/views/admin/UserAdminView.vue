@@ -7,6 +7,7 @@ import { fetchRoles } from '@/apis/roles'
 import { useI18n } from 'vue-i18n'
 import type { UserWithRoles } from '@/types/user'
 import type { RoleInfo } from '@/types'
+import { fetchAllPages } from '@/utils/pagination'
 const rows = ref<UserWithRoles[]>([])
 const roles = ref<RoleInfo[]>([])
 const selectedIds = ref<number[]>([])
@@ -22,8 +23,7 @@ async function reload() {
   total.value = data.total
 }
 async function reloadRoles() {
-  const data = await fetchRoles({ page: 1, page_size: 1000 });
-  roles.value = data.list
+  roles.value = await fetchAllPages(fetchRoles)
 }
 function resetFilters() { query.username = ''; page.value = 1; reload() }
 function onSelChange(arr: UserWithRoles[]) { selectedIds.value = arr.map(it => it.user.id) }

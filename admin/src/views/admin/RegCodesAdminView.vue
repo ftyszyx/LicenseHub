@@ -113,6 +113,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { RegCodeStatus, RegCodeType } from '@/types/reg_codes'
 import { formatTime } from '@/utils'
+import { fetchAllPages } from '@/utils/pagination'
 const { t } = useI18n()
 
 const statusOptions = (Object.values(RegCodeStatus).filter(v => typeof v === 'number') as number[]).map(v => {
@@ -231,8 +232,8 @@ async function copy(text: string) { try { await navigator.clipboard.writeText(te
 onMounted(async () => { await loadApps(); await reload() })
 
 async function loadApps() {
-  const data = await fetchApps({ page: 1, page_size: 1000 })
-  appOptions.value = data.list.map((a: any) => ({ id: a.id, name: a.name, code_type: a.code_type as RegCodeType }))
+  const apps = await fetchAllPages(fetchApps)
+  appOptions.value = apps.map(a => ({ id: a.id, name: a.name, code_type: a.code_type as RegCodeType }))
   if ((!batch.app_id || batch.app_id === 0) && appOptions.value.length) { batch.app_id = appOptions.value[0].id }
   applyBatchAppType()
 }

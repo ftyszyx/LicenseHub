@@ -5,6 +5,7 @@ import { ElMessage, type CheckboxValueType } from 'element-plus'
 import { fetchPermissions, fetchRolePermissionIds, setRolePermissions } from '@/apis/permissions'
 import { fetchRoles } from '@/apis/roles'
 import type { PermissionInfo, RoleInfo } from '@/types'
+import { fetchAllPages } from '@/utils/pagination'
 
 type PermissionGroup = {
   resource: string
@@ -197,11 +198,11 @@ function toggleAllGranular(checked: CheckboxValueType) {
 async function loadRolesAndPermissions() {
   loading.value = true
   try {
-    const [rolesResponse, permissionList] = await Promise.all([
-      fetchRoles({ page: 1, page_size: 1000 }),
+    const [roleList, permissionList] = await Promise.all([
+      fetchAllPages(fetchRoles),
       fetchPermissions(),
     ])
-    roles.value = rolesResponse.list
+    roles.value = roleList
     permissions.value = permissionList
     if (!selectedRoleId.value && roles.value.length) {
       selectedRoleId.value = roles.value[0].id
@@ -242,8 +243,8 @@ onMounted(loadRolesAndPermissions)
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-4">
+  <div class="permission-page">
+    <div class="permission-fixed flex flex-wrap items-center justify-between gap-4">
       <div>
         <h2 class="text-xl font-semibold text-slate-950">权限分配</h2>
         <div class="mt-1 text-sm text-slate-500">{{ permissionSummary }}</div>
@@ -259,7 +260,7 @@ onMounted(loadRolesAndPermissions)
       </el-button>
     </div>
 
-    <section class="rounded-lg border border-slate-200 bg-white p-4">
+    <section class="permission-fixed rounded-lg border border-slate-200 bg-white p-4">
       <div class="flex flex-wrap items-end gap-5">
         <div class="w-72 max-w-full">
           <div class="mb-2 text-sm font-medium text-slate-700">角色</div>
@@ -282,7 +283,7 @@ onMounted(loadRolesAndPermissions)
 
     <section
       v-if="wildcardPermission"
-      class="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3"
+      class="permission-fixed flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3"
     >
       <div class="flex min-w-0 items-center gap-3">
         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
@@ -302,8 +303,8 @@ onMounted(loadRolesAndPermissions)
       </el-checkbox>
     </section>
 
-    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <el-table v-loading="loading" :data="permissionGroups" row-key="resource" stripe>
+    <section class="permission-list rounded-lg border border-slate-200 bg-white">
+      <el-table v-loading="loading" :data="permissionGroups" row-key="resource" stripe height="100%">
         <el-table-column label="功能模块" min-width="230" fixed="left">
           <template #default="{ row }">
             <el-checkbox
@@ -345,3 +346,24 @@ onMounted(loadRolesAndPermissions)
     </section>
   </div>
 </template>
+
+<style scoped>
+.permission-page {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1rem;
+  overflow: hidden;
+}
+
+.permission-fixed {
+  flex: none;
+}
+
+.permission-list {
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+</style>

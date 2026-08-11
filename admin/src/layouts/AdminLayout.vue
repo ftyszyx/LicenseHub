@@ -3,8 +3,8 @@
     <aside class="flex w-64 flex-col border-r border-slate-200 bg-white">
       <AppSidebarMenu class="flex-1" />
     </aside>
-    <main class="flex-1 overflow-auto p-6">
-      <div class="mb-4 flex items-center justify-end gap-3">
+    <main class="admin-main p-6">
+      <div class="admin-toolbar mb-4 flex items-center justify-end gap-3">
         <el-dropdown @command="onLangCommand">
           <el-button text>{{ currentLocaleLabel }}</el-button>
           <template #dropdown>
@@ -24,7 +24,9 @@
           </template>
         </el-dropdown>
       </div>
-      <RouterView />
+      <div class="admin-content">
+        <RouterView />
+      </div>
     </main>
     <el-dialog v-model="pwdVisible" :title="$t('auth.change_password')" width="420px">
       <el-form label-width="130px">
@@ -79,5 +81,22 @@ function onLangCommand(cmd: string){ localeStore.setLocale(cmd as any) }
 function onSettingsCommand(cmd: string){ if(cmd==='pwd'){ openChangePwd() } else if(cmd==='logout'){ handleLogout() } }
 </script>
 
-<style>
+<style scoped>
+.admin-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-toolbar {
+  flex: none;
+}
+
+.admin-content {
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: auto;
+}
 </style>

@@ -166,6 +166,7 @@ import type { AppModel } from '@/types/apps'
 import type { DeviceInfo } from '@/types/app_devices'
 import type { RegCodeBindCheckResp, UseCountResp } from '@/types/reg_codes'
 import { formatTime } from '@/utils'
+import { fetchAllPages } from '@/utils/pagination'
 
 const { t } = useI18n()
 
@@ -213,10 +214,10 @@ async function ensureDevicesLoaded(appId: number) {
   if (!appId || deviceOptionsMap.value[appId]) {
     return
   }
-  const data = await fetchDevices({ app_id: appId, page: 1, page_size: 1000 })
+  const devices = await fetchAllPages(params => fetchDevices({ ...params, app_id: appId }))
   deviceOptionsMap.value = {
     ...deviceOptionsMap.value,
-    [appId]: data.list,
+    [appId]: devices,
   }
 }
 
@@ -320,8 +321,7 @@ async function submitUseCount() {
 }
 
 async function loadApps() {
-  const data = await fetchApps({ page: 1, page_size: 1000 })
-  appOptions.value = data.list
+  appOptions.value = await fetchAllPages(fetchApps)
 
   if ((!bindForm.app_id || bindForm.app_id === 0) && appOptions.value.length) {
     bindForm.app_id = appOptions.value[0].id

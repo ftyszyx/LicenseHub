@@ -111,6 +111,7 @@ import { fetchApps } from '@/apis/apps'
 import type { LicensePlan, ListPlansParams, SavePlanReq } from '@/types/payments'
 import { PlanStatus } from '@/types/payments'
 import { RegCodeType } from '@/types/reg_codes'
+import { fetchAllPages } from '@/utils/pagination'
 
 const rows = ref<LicensePlan[]>([])
 const appOptions = ref<{ id: number, name: string, code_type: RegCodeType }[]>([])
@@ -241,8 +242,8 @@ async function remove(row: LicensePlan) {
 }
 
 async function loadApps() {
-  const data = await fetchApps({ page: 1, page_size: 1000 })
-  appOptions.value = data.list.map(a => ({ id: a.id, name: a.name, code_type: a.code_type as RegCodeType }))
+  const apps = await fetchAllPages(fetchApps)
+  appOptions.value = apps.map(a => ({ id: a.id, name: a.name, code_type: a.code_type as RegCodeType }))
 }
 
 onMounted(async () => {
