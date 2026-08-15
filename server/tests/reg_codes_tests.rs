@@ -1045,6 +1045,7 @@ async fn test_reg_codes_search_filters() {
         helpers::get_url("/api/admin/reg_codes/list?status=1"),
         helpers::get_url("/api/admin/reg_codes/list?code=TEST"),
         helpers::get_url("/api/admin/reg_codes/list?app_id=1"),
+        helpers::get_url("/api/admin/reg_codes/list?device_id=TEST-DEVICE"),
     ];
     for url in test_cases {
         let response = TestClient::get(url)

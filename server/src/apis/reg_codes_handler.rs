@@ -175,6 +175,8 @@ pub struct SearchRegCodesParams {
     pub status: Option<i16>,
     #[serde(default)]
     pub code_type: Option<CodeType>,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
@@ -655,6 +657,9 @@ pub async fn get_list_impl(
     }
     if let Some(v) = params.code_type {
         query = query.filter(reg_codes::Column::CodeType.eq(i16::from(v)));
+    }
+    if let Some(v) = params.device_id {
+        query = query.filter(app_devices::Column::DeviceId.contains(v));
     }
 
     let paginator = query.paginate(&state.db, page_size);

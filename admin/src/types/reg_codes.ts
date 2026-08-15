@@ -11,7 +11,8 @@ export interface RegCodeModel {
   binding_time?: string | null
   code_type: RegCodeType
   total_count?: number | null
-  device_id?: string | null
+  device_id?: number | null
+  device_id_str?: string | null
   created_at: string
   updated_at: string
   app_name?: string | null
@@ -35,6 +36,7 @@ export type ListRegCodesParams = {
   app_id?: number
   status?: RegCodeStatus
   code_type?: RegCodeType
+  device_id?: string
 } & ListParamsReq
 
 export interface BatchCreateRegCodesReq {

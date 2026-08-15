@@ -1,10 +1,11 @@
 <template>
   <div class="admin-list-page">
     <el-card class="admin-list-fixed" shadow="hover">
-      <div class="flex items-center justify-between">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-xl font-semibold">{{ $t('reg_codes.title') }}</h2>
-        <div class="flex items-center gap-2">
-          <el-input v-model="query.code" :placeholder="$t('reg_codes.search_code')" clearable class="w-56" />
+        <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+          <el-input v-model="query.code" :placeholder="$t('reg_codes.search_code')" clearable class="w-56" @keyup.enter="search" />
+          <el-input v-model="query.device_id" placeholder="设备 ID" clearable class="w-48" @keyup.enter="search" />
           <el-select v-model.number="query.app_id" placeholder="App" clearable class="w-48">
             <el-option v-for="opt in appOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
           </el-select>
@@ -15,7 +16,7 @@
           <el-select v-model="query.status" :placeholder="$t('reg_codes.status')" clearable class="w-36">
             <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
-          <el-button type="primary" @click="reload">{{ $t('common.search') }}</el-button>
+          <el-button type="primary" @click="search">{{ $t('common.search') }}</el-button>
           <el-button @click="resetFilters">{{ $t('common.reset') }}</el-button>
           <el-button type="success" @click="openBatchDialog">{{ $t('reg_codes.batch_create') }}</el-button>
           <el-button type="danger" :disabled="!selectedIds.length" @click="batchDelete">{{ $t('reg_codes.batch_delete')
@@ -58,7 +59,9 @@
             <el-tag :type="statusTagType(row.status)" effect="light">{{ $t(`reg_codes.status_${RegCodeStatus[row.status].toLowerCase()}`) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="device_id" :label="$t('reg_codes.device_id')" min-width="180" />
+        <el-table-column prop="device_id_str" :label="$t('reg_codes.device_id')" min-width="180">
+          <template #default="{ row }">{{ row.device_id_str || '-' }}</template>
+        </el-table-column>
         <el-table-column :label="$t('reg_codes.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
@@ -139,14 +142,21 @@ const pageSize = ref(20)
 const total = ref(0)
 const selectedIds = ref<number[]>([])
 
-const query = reactive<ListRegCodesParams>({ code: '', app_id: undefined, code_type: RegCodeType.Time })
+const query = reactive<ListRegCodesParams>({ code: '', device_id: '', app_id: undefined, code_type: RegCodeType.Time })
 
 async function reload() {
-  const data = await fetchRegCodes({ ...query, page: page.value, page_size: pageSize.value })
+  const data = await fetchRegCodes({
+    ...query,
+    code: query.code?.trim() || undefined,
+    device_id: query.device_id?.trim() || undefined,
+    page: page.value,
+    page_size: pageSize.value,
+  })
   rows.value = data.list
   total.value = data.total
 }
-function resetFilters() { query.code = ''; query.app_id = undefined; query.code_type = RegCodeType.Time; query.status = undefined; page.value = 1; reload() }
+function search() { page.value = 1; reload() }
+function resetFilters() { query.code = ''; query.device_id = ''; query.app_id = undefined; query.code_type = RegCodeType.Time; query.status = undefined; page.value = 1; reload() }
 function onSelChange(arr: RegCodeModel[]) { selectedIds.value = arr.map(it => it.id) }
 function handlePageChange(p: number) { page.value = p; reload() }
 function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reload() }
