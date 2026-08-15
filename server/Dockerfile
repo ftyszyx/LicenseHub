@@ -1,6 +1,7 @@
 # Stage 1: Build
 FROM rust:1.92-slim-bookworm AS builder
 ARG APP_NAME=app_server
+ARG APP_VERSION=
 ARG USE_ALIYUN_DEBIAN_MIRROR=1
 ARG USE_ALIYUN_CRATES_MIRROR=1
 ENV CARGO_HOME=/usr/local/cargo
@@ -19,7 +20,11 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/src/app/target \
-    cargo build --release --workspace  \
+    if [ -n "$APP_VERSION" ]; then \
+      APP_VERSION="$APP_VERSION" cargo build --release --workspace; \
+    else \
+      cargo build --release --workspace; \
+    fi \
     && mkdir -p /usr/src/out \
     && cp target/release/${APP_NAME} /usr/src/out/${APP_NAME}
 RUN cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features native-tls,postgres

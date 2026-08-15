@@ -2,11 +2,29 @@ use crate::apis::log_middleware;
 use crate::apis::{self, *};
 use crate::core::app::AppState;
 use crate::core::rbac::RequirePerm;
+use crate::core::response::ApiResponse;
 use salvo::cors::{AllowHeaders, AllowOrigin, Cors};
 use salvo::http::Method;
 use salvo::prelude::*;
 use salvo_oapi::security::{Http, HttpAuthScheme};
 use salvo_oapi::{OpenApi, SecurityScheme};
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct ServerVersionInfo {
+    version: &'static str,
+}
+
+#[handler]
+async fn version_info(res: &mut Response) {
+    const SERVER_VERSION: &str = match option_env!("APP_VERSION") {
+        Some(version) if !version.is_empty() => version,
+        _ => env!("CARGO_PKG_VERSION"),
+    };
+    res.render(Json(ApiResponse::success(ServerVersionInfo {
+        version: SERVER_VERSION,
+    })));
+}
 
 #[handler]
 async fn health_check(res: &mut Response) {
@@ -363,6 +381,7 @@ pub fn create_router(app_state: AppState) -> Service {
             Router::with_path("/api/auth/email-verifications/{challenge_id}/verify")
                 .post(apis::email_verification_handler::verify_email_code),
         )
+        .push(Router::with_path("/api/version").get(version_info))
         .get(health_check)
         .push(
             Router::with_path("/api/site-settings")

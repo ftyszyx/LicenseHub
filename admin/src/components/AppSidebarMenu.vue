@@ -6,6 +6,7 @@
         <div class="min-w-0">
           <div class="truncate text-base font-semibold text-slate-950">{{ $t("app.title") }}</div>
           <div class="text-xs text-slate-500">{{ $t("menu.console") }}</div>
+          <div v-if="serverVersion" class="text-xs text-slate-400">Server v{{ serverVersion }}</div>
         </div>
       </div>
     </div>
@@ -14,9 +15,11 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
 import AppMenu from "./AppMenu.vue";
 import type { AdminMenuItem } from "@/types/menu";
 import { RoutePath } from "@/types/route";
+import { fetchServerVersion } from "@/apis/version";
 const baseMenuItems: AdminMenuItem[] = [
   //i18n-key: menu.dashboard
   {
@@ -78,6 +81,15 @@ const baseMenuItems: AdminMenuItem[] = [
 const menuItems = baseMenuItems;
 
 const defaultOpeneds = ["overview", "business", "license", "system"];
+const serverVersion = ref("");
+
+onMounted(async () => {
+  try {
+    serverVersion.value = (await fetchServerVersion()).version;
+  } catch {
+    serverVersion.value = "";
+  }
+});
 </script>
 
 <style scoped></style>
