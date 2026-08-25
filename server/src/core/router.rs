@@ -205,6 +205,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .post(apis::payment_handler::confirm_order_refund),
         )
         .push(
+            Router::with_path("orders/{id}/refund-attachment")
+                .hoop(RequirePerm::new("orders", "READ"))
+                .get(apis::payment_handler::refund_attachment),
+        )
+        .push(
             Router::with_path("distribution/commissions")
                 .hoop(RequirePerm::new("distribution", "READ"))
                 .get(apis::distribution_handler::admin_commissions),
@@ -273,6 +278,26 @@ pub fn create_router(app_state: AppState) -> Service {
             Router::with_path("storage-channels/{id}")
                 .hoop(RequirePerm::new("storage_channels", "DELETE"))
                 .delete(apis::version_sync_handler::delete_storage_channel),
+        )
+        .push(
+            Router::with_path("resources")
+                .hoop(RequirePerm::new("resources", "CREATE"))
+                .post(apis::resource_handler::upload_resource_handler),
+        )
+        .push(
+            Router::with_path("resources/list")
+                .hoop(RequirePerm::new("resources", "READ"))
+                .get(apis::resource_handler::list_resources),
+        )
+        .push(
+            Router::with_path("resources/{id}/download")
+                .hoop(RequirePerm::new("resources", "READ"))
+                .get(apis::resource_handler::download_resource_handler),
+        )
+        .push(
+            Router::with_path("resources/{id}")
+                .hoop(RequirePerm::new("resources", "DELETE"))
+                .delete(apis::resource_handler::delete_resource_handler),
         )
         .push(
             Router::with_path("apps/{id}/version-manifest")

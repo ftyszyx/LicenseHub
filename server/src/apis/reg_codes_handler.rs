@@ -8,7 +8,7 @@ use crate::utils::license_signing::{
     LicensePayload, SignedLicense, app_key_hash, public_key_b64_from_private_key, sign_license,
 };
 use chrono::{DateTime, FixedOffset, Utc};
-use data_model::{app_devices, apps, orders, reg_codes};
+use data_model::{app_devices, apps, reg_codes};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::extract::PathParam;
 use salvo_oapi::{ToSchema, endpoint};
@@ -57,6 +57,7 @@ pub enum RegCodeStatus {
     Issued = 1,
     Binded = 2,
     Refunded = 3,
+    Revoked = 4,
 }
 
 impl Default for RegCodeStatus {
@@ -72,6 +73,7 @@ impl From<i16> for RegCodeStatus {
             1 => RegCodeStatus::Issued,
             2 => RegCodeStatus::Binded,
             3 => RegCodeStatus::Refunded,
+            4 => RegCodeStatus::Revoked,
             _ => RegCodeStatus::Unused,
         }
     }
@@ -333,10 +335,13 @@ pub async fn update_impl(
     let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
     let reg_code =
         reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
-    if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Refunded {
+    if matches!(
+        RegCodeStatus::from(reg_code.status),
+        RegCodeStatus::Refunded | RegCodeStatus::Revoked
+    ) {
         return Err(AppError::business_logic(
-            "REG_CODE_REFUNDED_LOCKED",
-            "refunded reg code cannot be changed",
+            "REG_CODE_STATUS_LOCKED",
+            "refunded or revoked reg code cannot be changed",
         ));
     }
     let final_app_id = req.app_id.unwrap_or(reg_code.app_id);
@@ -365,9 +370,12 @@ pub async fn update_impl(
     }
     if let Some(v) = req.status {
         let status = RegCodeStatus::from(v);
-        if status == RegCodeStatus::Binded || status == RegCodeStatus::Refunded {
+        if matches!(
+            status,
+            RegCodeStatus::Binded | RegCodeStatus::Refunded | RegCodeStatus::Revoked
+        ) {
             return Err(AppError::validation(
-                "cannot set reg_code status to binded or refunded directly",
+                "cannot set reg_code status to binded, refunded, or revoked directly",
             ));
         }
         reg_code.status = Set(v);
@@ -448,19 +456,22 @@ pub async fn update_status_impl(
     let reg_code =
         reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
 
-    if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded {
+    if matches!(
+        RegCodeStatus::from(reg_code.status),
+        RegCodeStatus::Binded | RegCodeStatus::Refunded | RegCodeStatus::Revoked
+    ) {
         return Err(AppError::business_logic(
             "REG_CODE_STATUS_LOCKED",
-            "reg code is binded, status cannot be changed",
+            "binded, refunded, or revoked reg code status cannot be changed",
         ));
     }
 
     if req.status == RegCodeStatus::Binded {
         return Err(AppError::validation("cannot set reg_code status to binded"));
     }
-    if req.status == RegCodeStatus::Refunded {
+    if matches!(req.status, RegCodeStatus::Refunded | RegCodeStatus::Revoked) {
         return Err(AppError::validation(
-            "cannot set reg_code status to refunded directly",
+            "cannot set reg_code status to refunded or revoked directly",
         ));
     }
 
@@ -502,35 +513,23 @@ pub async fn revoke_impl(state: &AppState, id: i32) -> Result<RegCodeInfo, AppEr
         .await?
         .ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
 
-    let delivered_order = orders::Entity::find()
-        .filter(orders::Column::RegCodeId.eq(id))
-        .filter(orders::Column::Status.eq(2))
-        .one(&tx)
-        .await?;
-    if delivered_order.is_some() {
-        return Err(AppError::business_logic(
-            "ORDER_REFUND_REQUIRED",
-            "paid order registration codes must be revoked through order refund confirmation",
-        ));
-    }
-
     match RegCodeStatus::from(reg_code.status) {
-        RegCodeStatus::Binded => {}
+        RegCodeStatus::Unused | RegCodeStatus::Issued | RegCodeStatus::Binded => {}
         RegCodeStatus::Refunded => {
             return Err(AppError::business_logic(
                 "REG_CODE_ALREADY_REFUNDED",
                 "reg code is already refunded",
             ));
         }
-        _ => {
+        RegCodeStatus::Revoked => {
             return Err(AppError::business_logic(
-                "REG_CODE_REVOKE_FORBIDDEN",
-                "only binded reg codes can be refunded",
+                "REG_CODE_ALREADY_REVOKED",
+                "reg code authorization is already revoked",
             ));
         }
     }
 
-    let updated_reg_code = apply_reg_code_revocation(&tx, reg_code).await?;
+    let updated_reg_code = apply_reg_code_revocation(&tx, reg_code, RegCodeStatus::Revoked).await?;
     tx.commit().await?;
 
     get_by_id_impl(state, updated_reg_code.id).await
@@ -549,13 +548,14 @@ pub(crate) async fn revoke_reg_code_for_order(
     if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Refunded {
         return Ok(());
     }
-    apply_reg_code_revocation(tx, reg_code).await?;
+    apply_reg_code_revocation(tx, reg_code, RegCodeStatus::Refunded).await?;
     Ok(())
 }
 
 async fn apply_reg_code_revocation(
     tx: &DatabaseTransaction,
     reg_code: reg_codes::Model,
+    target_status: RegCodeStatus,
 ) -> Result<reg_codes::Model, AppError> {
     let now = Utc::now().fixed_offset();
     if RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded {
@@ -592,7 +592,7 @@ async fn apply_reg_code_revocation(
     }
 
     let mut active_reg_code = reg_code.into_active_model();
-    active_reg_code.status = Set(i16::from(RegCodeStatus::Refunded));
+    active_reg_code.status = Set(i16::from(target_status));
     active_reg_code.device_id = Set(None);
     active_reg_code.updated_at = Set(now);
     Ok(active_reg_code.update(tx).await?)
@@ -924,10 +924,21 @@ pub async fn bind_code_impl(
     let app_model = find_app_by_key(state, &req.app_key).await?;
     let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
     let reg_code_model = find_reg_code_by_app_and_code(state, app_model.id, &req.reg_code).await?;
-    if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Refunded {
+    if matches!(
+        RegCodeStatus::from(reg_code_model.status),
+        RegCodeStatus::Refunded | RegCodeStatus::Revoked
+    ) {
         return Err(AppError::business_logic(
-            "REG_CODE_REFUNDED",
-            "reg code has been refunded",
+            if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Revoked {
+                "REG_CODE_REVOKED"
+            } else {
+                "REG_CODE_REFUNDED"
+            },
+            if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Revoked {
+                "reg code authorization has been revoked"
+            } else {
+                "reg code has been refunded"
+            },
         ));
     }
     let private_key_b64 = require_license_signing_private_key_b64(state).await?;
@@ -1265,10 +1276,21 @@ pub async fn validate_code_impl(
         .one(&state.db)
         .await?
         .ok_or(AppError::not_found("reg_code".to_string(), None))?;
-    if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Refunded {
+    if matches!(
+        RegCodeStatus::from(reg_code_model.status),
+        RegCodeStatus::Refunded | RegCodeStatus::Revoked
+    ) {
         return Err(AppError::business_logic(
-            "REG_CODE_REFUNDED",
-            "reg code has been refunded",
+            if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Revoked {
+                "REG_CODE_REVOKED"
+            } else {
+                "REG_CODE_REFUNDED"
+            },
+            if RegCodeStatus::from(reg_code_model.status) == RegCodeStatus::Revoked {
+                "reg code authorization has been revoked"
+            } else {
+                "reg code has been refunded"
+            },
         ));
     }
     match app_model.code_type.into() {

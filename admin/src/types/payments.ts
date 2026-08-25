@@ -20,6 +20,9 @@ export interface OrderRefundInfo {
   refund_reference: string
   reason: string
   operator_user_id: number
+  attachment_file_name?: string | null
+  attachment_content_type?: string | null
+  attachment_size?: number | null
   refunded_at: string
 }
 
@@ -97,6 +100,8 @@ export interface OrderModel {
 
 export type ListOrdersParams = {
   order_no?: string
+  reg_code?: string
+  buyer?: string
   status?: OrderStatus
   plan_id?: number
   app_id?: number

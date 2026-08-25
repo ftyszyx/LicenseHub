@@ -1,4 +1,7 @@
-use crate::types::{StorageAdapter, StorageError, UploadRequest, UploadResult};
+use crate::types::{
+    DeleteRequest, DownloadRequest, DownloadResult, StorageAdapter, StorageError, UploadRequest,
+    UploadResult,
+};
 use async_trait::async_trait;
 
 #[derive(Default)]
@@ -18,5 +21,18 @@ impl StorageAdapter for MockStorageAdapter {
         Ok(UploadResult {
             etag: Some("mock-etag".to_string()),
         })
+    }
+
+    async fn download(
+        &self,
+        _request: DownloadRequest<'_>,
+    ) -> Result<DownloadResult, StorageError> {
+        Err(StorageError::Request(
+            "mock storage does not contain downloadable objects".to_string(),
+        ))
+    }
+
+    async fn delete(&self, _request: DeleteRequest<'_>) -> Result<(), StorageError> {
+        Ok(())
     }
 }

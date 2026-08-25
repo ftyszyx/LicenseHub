@@ -58,6 +58,25 @@
     </el-card>
 
     <el-card shadow="never">
+      <template #header><h3 class="text-base font-semibold">通用资源设置</h3></template>
+      <el-form v-loading="loading" :model="form" label-width="170px" class="max-w-3xl">
+        <el-form-item label="资源存储渠道">
+          <el-select v-model="form.resource_storage_channel_id" class="w-80">
+            <el-option label="自动选择（按存储渠道排序）" :value="0" />
+            <el-option
+              v-for="channel in storageChannels"
+              :key="channel.id"
+              :label="storageChannelLabel(channel)"
+              :value="channel.id"
+              :disabled="channel.status !== StorageChannelStatus.Enabled"
+            />
+          </el-select>
+          <span class="ml-3 text-sm text-gray-500">以后所有图片和文件资源默认使用此渠道</span>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never">
       <template #header><h3 class="text-base font-semibold">分销设置</h3></template>
       <el-form v-loading="loading" :model="form" label-width="170px" class="max-w-3xl">
         <el-form-item label="开放分销功能">
@@ -196,7 +215,9 @@ import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { fetchSystemSettings, generateLicenseSigningKey, sendSystemTestEmail, updateSystemSettings } from '@/apis/system_settings'
+import { fetchStorageChannels } from '@/apis/storage'
 import type { LicenseSigningInfo, SaveSystemSettingsReq, SiteSettings } from '@/types'
+import { StorageChannelStatus, type StorageChannel } from '@/types/storage'
 
 const { t } = useI18n()
 const formRef = ref<FormInstance>()
@@ -210,6 +231,7 @@ const emailModeOptions = [
   { label: '开发日志', value: 'log' },
   { label: 'SMTP', value: 'smtp' },
 ]
+const storageChannels = ref<StorageChannel[]>([])
 
 type SettingsForm = SaveSystemSettingsReq & {
   distribution_default_rate_percent: number
@@ -219,6 +241,7 @@ type SettingsForm = SaveSystemSettingsReq & {
 const form = reactive<SettingsForm>({
   storefront_title: 'LicenseHub',
   registration_enabled: false,
+  resource_storage_channel_id: 0,
   distribution_enabled: false,
   distribution_referrer_binding_enabled: false,
   distribution_default_rate_bps: 2000,
@@ -255,6 +278,12 @@ async function load() {
   loading.value = true
   try {
     const data = await fetchSystemSettings()
+    try {
+      const channels = await fetchStorageChannels({ page: 1, page_size: 100 })
+      storageChannels.value = channels.list
+    } catch {
+      storageChannels.value = []
+    }
     assignSettings(data)
   } finally {
     loading.value = false
@@ -264,6 +293,7 @@ async function load() {
 function assignSettings(data: SiteSettings) {
   form.storefront_title = data.storefront_title || 'LicenseHub'
   form.registration_enabled = Boolean(data.registration_enabled)
+  form.resource_storage_channel_id = data.resource_storage_channel_id ?? 0
   form.distribution_enabled = Boolean(data.distribution?.enabled)
   form.distribution_referrer_binding_enabled = Boolean(data.distribution?.referrer_binding_enabled)
   form.distribution_default_rate_bps = data.distribution?.default_rate_bps ?? 2000
@@ -299,6 +329,7 @@ async function submit() {
     const data = await updateSystemSettings({
       storefront_title: form.storefront_title.trim(),
       registration_enabled: form.registration_enabled,
+      resource_storage_channel_id: form.resource_storage_channel_id,
       distribution_enabled: form.distribution_enabled,
       distribution_referrer_binding_enabled: form.distribution_referrer_binding_enabled,
       distribution_default_rate_bps: Math.round(form.distribution_default_rate_percent * 100),
@@ -318,6 +349,11 @@ async function submit() {
   } finally {
     saving.value = false
   }
+}
+
+function storageChannelLabel(channel: StorageChannel) {
+  const status = channel.status === StorageChannelStatus.Enabled ? '启用' : '停用'
+  return `${channel.name || `渠道 #${channel.id}`}（${channel.provider}，${status}）`
 }
 
 async function sendTestEmail() {

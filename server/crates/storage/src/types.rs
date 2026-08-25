@@ -40,11 +40,31 @@ pub struct UploadRequest<'a> {
     pub config: &'a StorageChannelConfig,
     pub object_key: &'a str,
     pub body: &'a [u8],
+    pub content_type: &'a str,
+    pub private: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct UploadResult {
     pub etag: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadRequest<'a> {
+    pub config: &'a StorageChannelConfig,
+    pub object_key: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadResult {
+    pub body: Vec<u8>,
+    pub content_type: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteRequest<'a> {
+    pub config: &'a StorageChannelConfig,
+    pub object_key: &'a str,
 }
 
 #[async_trait]
@@ -53,6 +73,10 @@ pub trait StorageAdapter: Send + Sync {
     fn label(&self) -> &'static str;
 
     async fn upload(&self, request: UploadRequest<'_>) -> Result<UploadResult, StorageError>;
+
+    async fn download(&self, request: DownloadRequest<'_>) -> Result<DownloadResult, StorageError>;
+
+    async fn delete(&self, request: DeleteRequest<'_>) -> Result<(), StorageError>;
 }
 
 pub fn normalize_storage_provider(provider: &str) -> Result<String, StorageError> {

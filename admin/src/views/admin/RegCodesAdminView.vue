@@ -69,7 +69,7 @@
           <template #default="{ row }">
             <div class="flex justify-end gap-2">
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" plain @click="markIssued(row)">{{ $t('reg_codes.mark_issued') }}</el-button>
-              <el-button v-if="row.status === RegCodeStatus.binded" size="small" type="warning" plain @click="revoke(row)">{{ $t('reg_codes.revoke') }}</el-button>
+              <el-button v-if="row.status !== RegCodeStatus.Refunded && row.status !== RegCodeStatus.Revoked" size="small" type="warning" plain @click="revoke(row)">{{ $t('reg_codes.revoke') }}</el-button>
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="danger" plain @click="del(row.id)">{{ $t('common.delete') }}</el-button>
             </div>
           </template>
@@ -131,7 +131,7 @@ function statusTagType(status: RegCodeStatus) {
   if (status === RegCodeStatus.Unused) return 'info'
   if (status === RegCodeStatus.Issued) return 'success'
   if (status === RegCodeStatus.binded) return 'warning'
-  if (status === RegCodeStatus.Refunded) return 'danger'
+  if (status === RegCodeStatus.Refunded || status === RegCodeStatus.Revoked) return 'danger'
   return 'info'
 }
 

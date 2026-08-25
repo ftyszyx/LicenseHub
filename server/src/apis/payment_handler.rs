@@ -7,11 +7,12 @@ use crate::apis::reg_codes_handler::{CodeType, RegCodeStatus, revoke_reg_code_fo
 use crate::apis::system_settings_handler::get_distribution_settings;
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
+use crate::core::resource_service::{ResourceUpload, download_resource, upload_resource};
 use crate::core::response::ApiResponse;
 use chrono::Utc;
 use data_model::{
-    apps, distribution_commissions, license_plans, order_events, order_refunds, orders,
-    payment_channels, reg_codes, users,
+    apps, distribution_commissions, license_plans, order_events, order_refund_attachments,
+    order_refunds, orders, payment_channels, reg_codes, resources, users,
 };
 use payment_adapter::{
     AlipayPageAdapter, AlipayPageConfig, CreatePaymentRequest, PaymentAdapter, PaymentError,
@@ -21,9 +22,9 @@ use salvo::oapi::extract::JsonBody;
 use salvo::prelude::*;
 use salvo_oapi::extract::PathParam;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
+    Statement, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -41,6 +42,7 @@ const ORDER_EVENT_REFUND_CONFIRMED: &str = "refund.confirmed";
 const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
 const APP_STATUS_ENABLED: i16 = 1;
 const REFUND_STATUS_SUCCEEDED: i16 = 1;
+const MAX_REFUND_ATTACHMENT_SIZE: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i16)]
@@ -315,6 +317,8 @@ pub struct ListOrdersParams {
     #[serde(flatten)]
     pub pagination: ListParamsReq,
     pub order_no: Option<String>,
+    pub reg_code: Option<String>,
+    pub buyer: Option<String>,
     pub status: Option<i16>,
     pub plan_id: Option<i32>,
     pub app_id: Option<i32>,
@@ -334,6 +338,9 @@ pub struct OrderRefundInfo {
     pub refund_reference: String,
     pub reason: String,
     pub operator_user_id: i32,
+    pub attachment_file_name: Option<String>,
+    pub attachment_content_type: Option<String>,
+    pub attachment_size: Option<i64>,
     pub refunded_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
@@ -1092,6 +1099,32 @@ pub async fn list_orders(
     if let Some(order_no) = params.order_no {
         query = query.filter(orders::Column::OrderNo.contains(order_no));
     }
+    if let Some(reg_code) = params.reg_code {
+        query = query
+            .join(
+                sea_orm::JoinType::InnerJoin,
+                orders::Relation::RegCodes.def(),
+            )
+            .filter(reg_codes::Column::Code.contains(reg_code));
+    }
+    if let Some(buyer) = params.buyer {
+        let buyer = buyer.trim().to_string();
+        if !buyer.is_empty() {
+            let mut condition = Condition::any()
+                .add(orders::Column::BuyerEmail.contains(buyer.clone()))
+                .add(users::Column::Username.contains(buyer.clone()))
+                .add(users::Column::Email.contains(buyer.clone()));
+            if let Ok(user_id) = buyer.parse::<i32>() {
+                condition = condition.add(orders::Column::BuyerUserId.eq(user_id));
+            }
+            query = query
+                .join(
+                    sea_orm::JoinType::LeftJoin,
+                    orders::Relation::BuyerUser.def(),
+                )
+                .filter(condition);
+        }
+    }
     if let Some(status) = params.status {
         query = query.filter(orders::Column::Status.eq(status));
     }
@@ -1127,6 +1160,32 @@ pub async fn list_my_orders(
         .order_by_desc(orders::Column::CreatedAt);
     if let Some(order_no) = params.order_no {
         query = query.filter(orders::Column::OrderNo.contains(order_no));
+    }
+    if let Some(reg_code) = params.reg_code {
+        query = query
+            .join(
+                sea_orm::JoinType::InnerJoin,
+                orders::Relation::RegCodes.def(),
+            )
+            .filter(reg_codes::Column::Code.contains(reg_code));
+    }
+    if let Some(buyer) = params.buyer {
+        let buyer = buyer.trim().to_string();
+        if !buyer.is_empty() {
+            let mut condition = Condition::any()
+                .add(orders::Column::BuyerEmail.contains(buyer.clone()))
+                .add(users::Column::Username.contains(buyer.clone()))
+                .add(users::Column::Email.contains(buyer.clone()));
+            if let Ok(user_id) = buyer.parse::<i32>() {
+                condition = condition.add(orders::Column::BuyerUserId.eq(user_id));
+            }
+            query = query
+                .join(
+                    sea_orm::JoinType::LeftJoin,
+                    orders::Relation::BuyerUser.def(),
+                )
+                .filter(condition);
+        }
     }
     if let Some(status) = params.status {
         query = query.filter(orders::Column::Status.eq(status));
@@ -1169,15 +1228,103 @@ pub async fn get_my_order(
 pub async fn confirm_order_refund(
     depot: &mut Depot,
     id: PathParam<i32>,
-    req: JsonBody<ConfirmOrderRefundReq>,
+    req: &mut Request,
 ) -> Result<ApiResponse<OrderInfo>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     let claims = depot.obtain::<Claims>().unwrap();
-    let req = req.into_inner();
+    let content_type = req
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (req, attachment) = if content_type.starts_with("multipart/form-data") {
+        let form = req.form_data().await?;
+        let refund_reference = form
+            .fields
+            .get("refund_reference")
+            .cloned()
+            .unwrap_or_default();
+        let reason = form.fields.get("reason").cloned().unwrap_or_default();
+        let attachment = if let Some(file) = form.files.get("attachment") {
+            if file.size() > MAX_REFUND_ATTACHMENT_SIZE {
+                return Err(AppError::validation(
+                    "refund attachment must not exceed 5 MB",
+                ));
+            }
+            Some(RefundAttachment {
+                file_name: file.name().unwrap_or("refund-attachment").to_string(),
+                content_type: file
+                    .content_type()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                content: tokio::fs::read(file.path()).await.map_err(|error| {
+                    AppError::InternalError {
+                        message: format!("failed to read refund attachment: {error}"),
+                    }
+                })?,
+            })
+        } else {
+            None
+        };
+        (
+            ConfirmOrderRefundReq {
+                refund_reference,
+                reason,
+            },
+            attachment,
+        )
+    } else {
+        (req.parse_json::<ConfirmOrderRefundReq>().await?, None)
+    };
     req.validate()?;
     Ok(ApiResponse::success(
-        confirm_order_refund_impl(state, claims.user_id, id.into_inner(), req).await?,
+        confirm_order_refund_with_attachment_impl(
+            state,
+            claims.user_id,
+            id.into_inner(),
+            req,
+            attachment,
+        )
+        .await?,
     ))
+}
+
+#[derive(Debug)]
+struct RefundAttachment {
+    file_name: String,
+    content_type: String,
+    content: Vec<u8>,
+}
+
+fn validate_refund_attachment(attachment: RefundAttachment) -> Result<RefundAttachment, AppError> {
+    if attachment.content.is_empty() || attachment.content.len() as u64 > MAX_REFUND_ATTACHMENT_SIZE
+    {
+        return Err(AppError::validation(
+            "refund attachment must be between 1 byte and 5 MB",
+        ));
+    }
+    let content_type = attachment.content_type.to_ascii_lowercase();
+    if !matches!(
+        content_type.as_str(),
+        "image/jpeg" | "image/png" | "image/webp"
+    ) {
+        return Err(AppError::validation(
+            "refund attachment must be JPG, PNG, or WebP",
+        ));
+    }
+    let file_name = std::path::Path::new(&attachment.file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("refund-attachment")
+        .chars()
+        .take(255)
+        .collect::<String>();
+    Ok(RefundAttachment {
+        file_name,
+        content_type,
+        content: attachment.content,
+    })
 }
 
 pub async fn confirm_order_refund_impl(
@@ -1186,6 +1333,16 @@ pub async fn confirm_order_refund_impl(
     order_id: i32,
     req: ConfirmOrderRefundReq,
 ) -> Result<OrderInfo, AppError> {
+    confirm_order_refund_with_attachment_impl(state, operator_user_id, order_id, req, None).await
+}
+
+async fn confirm_order_refund_with_attachment_impl(
+    state: &AppState,
+    operator_user_id: i32,
+    order_id: i32,
+    req: ConfirmOrderRefundReq,
+    attachment: Option<RefundAttachment>,
+) -> Result<OrderInfo, AppError> {
     let refund_reference = req.refund_reference.trim().to_string();
     let reason = req.reason.trim().to_string();
     if refund_reference.is_empty() || reason.is_empty() {
@@ -1193,6 +1350,7 @@ pub async fn confirm_order_refund_impl(
             "refund_reference and reason must not be empty",
         ));
     }
+    let attachment = attachment.map(validate_refund_attachment).transpose()?;
 
     let tx = state.db.begin().await?;
     let order = orders::Entity::find_by_id(order_id)
@@ -1228,8 +1386,27 @@ pub async fn confirm_order_refund_impl(
     }
 
     let now = Utc::now().fixed_offset();
+    let refund_no = format!("RF{}", Uuid::new_v4().simple());
+    let resource = if let Some(attachment) = attachment.as_ref() {
+        Some(
+            upload_resource(
+                state,
+                &tx,
+                operator_user_id,
+                ResourceUpload {
+                    resource_type: "refund_attachment".to_string(),
+                    original_name: attachment.file_name.clone(),
+                    content_type: attachment.content_type.clone(),
+                    content: attachment.content.clone(),
+                },
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     let refund = order_refunds::ActiveModel {
-        refund_no: Set(format!("RF{}", Uuid::new_v4().simple())),
+        refund_no: Set(refund_no),
         order_id: Set(order.id),
         amount_cents: Set(order.amount_cents),
         provider: Set(order.provider.clone()),
@@ -1245,6 +1422,22 @@ pub async fn confirm_order_refund_impl(
     }
     .insert(&tx)
     .await?;
+
+    if attachment.is_some() {
+        order_refund_attachments::ActiveModel {
+            refund_id: Set(refund.id),
+            resource_id: Set(resource.as_ref().map(|value| value.id).ok_or_else(|| {
+                AppError::business_logic(
+                    "REFUND_RESOURCE_MISSING",
+                    "refund resource metadata is missing",
+                )
+            })?),
+            uploaded_by: Set(operator_user_id),
+            created_at: Set(now),
+        }
+        .insert(&tx)
+        .await?;
+    }
 
     let mut active = order.into_active_model();
     active.status = Set(i16::from(OrderStatus::Refunded));
@@ -1263,6 +1456,9 @@ pub async fn confirm_order_refund_impl(
             "provider": refund.provider,
             "provider_trade_no": refund.provider_trade_no,
             "operator_user_id": operator_user_id,
+            "attachment_file_name": resource.as_ref().map(|value| value.original_name.clone()),
+            "attachment_content_type": resource.as_ref().map(|value| value.content_type.clone()),
+            "attachment_size": resource.as_ref().map(|value| value.size),
         }),
     )
     .await?;
@@ -1270,6 +1466,48 @@ pub async fn confirm_order_refund_impl(
     tx.commit().await?;
 
     get_order_by_no_impl(state, &updated_order.order_no).await
+}
+
+#[handler]
+pub async fn refund_attachment(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let refund = order_refunds::Entity::find()
+        .filter(order_refunds::Column::OrderId.eq(id.into_inner()))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("order_refunds", None))?;
+    let attachment = order_refund_attachments::Entity::find_by_id(refund.id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("order_refund_attachments", None))?;
+    let resource = resources::Entity::find_by_id(attachment.resource_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("resources", None))?;
+    let downloaded = download_resource(state, &resource).await?;
+    let content_type = resource.content_type.clone();
+    res.headers_mut().insert(
+        salvo::http::header::CONTENT_TYPE,
+        salvo::http::HeaderValue::from_str(&content_type)
+            .map_err(|_| AppError::validation("invalid refund attachment content type"))?,
+    );
+    res.headers_mut().insert(
+        salvo::http::header::CONTENT_DISPOSITION,
+        salvo::http::HeaderValue::from_static("inline"),
+    );
+    res.headers_mut().insert(
+        salvo::http::header::CACHE_CONTROL,
+        salvo::http::HeaderValue::from_static("private, no-store"),
+    );
+    res.write_body(downloaded.body)
+        .map_err(|error| AppError::InternalError {
+            message: format!("failed to write refund attachment: {error}"),
+        })?;
+    Ok(())
 }
 
 pub async fn get_order_by_no_impl(state: &AppState, order_no: &str) -> Result<OrderInfo, AppError> {
@@ -1349,17 +1587,33 @@ async fn build_order_info(
             .await?
             .map(|r| r.code);
     }
-    info.refund = order_refunds::Entity::find()
+    if let Some(refund) = order_refunds::Entity::find()
         .filter(order_refunds::Column::OrderId.eq(info.id))
         .one(&state.db)
         .await?
-        .map(|refund| OrderRefundInfo {
+    {
+        let resource = if let Some(attachment) =
+            order_refund_attachments::Entity::find_by_id(refund.id)
+                .one(&state.db)
+                .await?
+        {
+            resources::Entity::find_by_id(attachment.resource_id)
+                .one(&state.db)
+                .await?
+        } else {
+            None
+        };
+        info.refund = Some(OrderRefundInfo {
             refund_no: refund.refund_no,
             refund_reference: refund.refund_reference,
             reason: refund.reason,
             operator_user_id: refund.operator_user_id,
+            attachment_file_name: resource.as_ref().map(|value| value.original_name.clone()),
+            attachment_content_type: resource.as_ref().map(|value| value.content_type.clone()),
+            attachment_size: resource.as_ref().map(|value| value.size),
             refunded_at: refund.refunded_at,
         });
+    }
     Ok(info)
 }
 

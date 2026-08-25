@@ -5,6 +5,8 @@
         <h2 class="text-xl font-semibold">{{ $t('orders.title') }}</h2>
         <div class="flex items-center gap-2">
           <el-input v-model="query.order_no" :placeholder="$t('orders.search_order_id')" clearable class="w-56" />
+          <el-input v-model="query.reg_code" :placeholder="$t('orders.search_reg_code')" clearable class="w-56" @keyup.enter="reload" />
+          <el-input v-model="query.buyer" :placeholder="$t('orders.search_buyer')" clearable class="w-56" @keyup.enter="reload" />
           <el-select v-model="query.status" :placeholder="$t('orders.status')" clearable class="w-36">
             <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
@@ -42,7 +44,18 @@
         <el-table-column prop="provider_trade_no" label="Trade No" min-width="180" />
         <el-table-column :label="$t('orders.refund_reference')" min-width="180">
           <template #default="{ row }">
-            <span v-if="row.refund" class="font-mono text-sm">{{ row.refund.refund_reference }}</span>
+            <div v-if="row.refund" class="flex flex-col items-start gap-1">
+              <span class="font-mono text-sm">{{ row.refund.refund_reference }}</span>
+              <el-button
+                v-if="row.refund.attachment_file_name"
+                link
+                type="primary"
+                size="small"
+                @click="viewRefundAttachment(row)"
+              >
+                查看附件
+              </el-button>
+            </div>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -98,6 +111,18 @@
         <el-form-item :label="$t('orders.refund_reason')" required>
           <el-input v-model="refundDialog.reason" type="textarea" :rows="3" maxlength="1000" show-word-limit />
         </el-form-item>
+        <el-form-item label="退款附件">
+          <el-upload
+            :auto-upload="false"
+            :limit="1"
+            accept="image/jpeg,image/png,image/webp"
+            :on-change="handleAttachmentChange"
+            :on-remove="clearAttachment"
+          >
+            <el-button :icon="Upload">选择图片</el-button>
+            <template #tip><div class="el-upload__tip">JPG、PNG 或 WebP，最大 5 MB，可选</div></template>
+          </el-upload>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="refundDialog.visible = false">{{ $t('common.cancel') }}</el-button>
@@ -111,8 +136,9 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { confirmOrderRefund, fetchOrders } from '@/apis/payments'
+import { ElMessage, type UploadFile } from 'element-plus'
+import { Upload } from '@element-plus/icons-vue'
+import { confirmOrderRefund, fetchOrderRefundAttachment, fetchOrders } from '@/apis/payments'
 import type { ListOrdersParams, OrderModel } from '@/types/payments'
 import { OrderStatus } from '@/types/payments'
 import { formatTime } from '@/utils'
@@ -131,6 +157,7 @@ const refundDialog = reactive({
   submitting: false,
   refund_reference: '',
   reason: '',
+  attachment: null as File | null,
 })
 
 const statusOptions = (Object.values(OrderStatus).filter(v => typeof v === 'number') as number[]).map(value => ({
@@ -156,7 +183,16 @@ function openRefund(row: OrderModel) {
   refundOrder.value = row
   refundDialog.refund_reference = ''
   refundDialog.reason = ''
+  refundDialog.attachment = null
   refundDialog.visible = true
+}
+
+function handleAttachmentChange(file: UploadFile) {
+  refundDialog.attachment = file.raw || null
+}
+
+function clearAttachment() {
+  refundDialog.attachment = null
 }
 
 async function submitRefund() {
@@ -172,12 +208,23 @@ async function submitRefund() {
     await confirmOrderRefund(refundOrder.value.id, {
       refund_reference: refundReference,
       reason,
-    })
+    }, refundDialog.attachment)
     ElMessage.success(String(t('orders.refund_success')))
     refundDialog.visible = false
     await reload()
   } finally {
     refundDialog.submitting = false
+  }
+}
+
+async function viewRefundAttachment(row: OrderModel) {
+  try {
+    const blob = await fetchOrderRefundAttachment(row.id)
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch {
+    ElMessage.error('附件打开失败')
   }
 }
 
@@ -189,6 +236,8 @@ async function reload() {
 
 function reset() {
   query.order_no = ''
+  query.reg_code = ''
+  query.buyer = ''
   query.status = undefined
   page.value = 1
   reload()

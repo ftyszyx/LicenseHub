@@ -374,7 +374,7 @@ async fn test_time_bind_and_check_return_signed_license() {
 }
 
 #[tokio::test]
-async fn test_revoke_time_reg_code_refunds_device_and_permanently_invalidates_code() {
+async fn test_revoke_time_reg_code_revokes_device_entitlement_and_permanently_invalidates_code() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;
     ctx.login_default_user().await;
@@ -441,7 +441,7 @@ async fn test_revoke_time_reg_code_refunds_device_and_permanently_invalidates_co
     .await;
     let revoke_json = print_response_body_get_json(resp, "revoke_time_reg_code").await;
     assert!(revoke_json["success"].as_bool().unwrap());
-    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(3));
+    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(4));
     assert!(revoke_json["data"]["device_id"].is_null());
 
     let resp = TestClient::post(helpers::get_url("/api/reg/check"))
@@ -457,7 +457,7 @@ async fn test_revoke_time_reg_code_refunds_device_and_permanently_invalidates_co
         .json(&json!({"app_key": app_key, "reg_code": code, "device_id": helpers::unique_name("rebind-time-dev")}))
         .send(&ctx.app)
         .await;
-    let rebind_json = print_response_body_get_json(resp, "rebind_refunded_time_code").await;
+    let rebind_json = print_response_body_get_json(resp, "rebind_revoked_time_code").await;
     assert!(!rebind_json["success"].as_bool().unwrap());
 
     let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
@@ -473,7 +473,7 @@ async fn test_revoke_time_reg_code_refunds_device_and_permanently_invalidates_co
 }
 
 #[tokio::test]
-async fn test_revoke_count_reg_code_restores_remaining_and_permanently_invalidates_code() {
+async fn test_revoke_count_reg_code_removes_remaining_and_permanently_invalidates_code() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;
     ctx.login_default_user().await;
@@ -556,7 +556,7 @@ async fn test_revoke_count_reg_code_restores_remaining_and_permanently_invalidat
     .await;
     let revoke_json = print_response_body_get_json(resp, "revoke_count_reg_code").await;
     assert!(revoke_json["success"].as_bool().unwrap());
-    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(3));
+    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(4));
     assert!(revoke_json["data"]["device_id"].is_null());
 
     let resp = TestClient::post(helpers::get_url("/api/reg/check"))
@@ -572,7 +572,7 @@ async fn test_revoke_count_reg_code_restores_remaining_and_permanently_invalidat
         .json(&json!({"app_key": app_key, "reg_code": code, "device_id": helpers::unique_name("rebind-count-dev")}))
         .send(&ctx.app)
         .await;
-    let rebind_json = print_response_body_get_json(resp, "rebind_refunded_count_code").await;
+    let rebind_json = print_response_body_get_json(resp, "rebind_revoked_count_code").await;
     assert!(!rebind_json["success"].as_bool().unwrap());
 
     let resp = TestClient::put(helpers::get_url(&format!(
@@ -584,7 +584,7 @@ async fn test_revoke_count_reg_code_restores_remaining_and_permanently_invalidat
     .json(&json!({"status": 1}))
     .send(&ctx.app)
     .await;
-    let update_json = print_response_body_get_json(resp, "update_refunded_count_code").await;
+    let update_json = print_response_body_get_json(resp, "update_revoked_count_code").await;
     assert!(!update_json["success"].as_bool().unwrap());
 }
 

@@ -80,9 +80,17 @@ export const fetchMyOrder = async (orderNo: string) => {
   return response.data
 }
 
-export const confirmOrderRefund = async (id: number, payload: ConfirmOrderRefundReq) => {
-  const response = await request.post(`/admin/orders/${id}/refund`, payload) as ApiResponse<OrderModel>
+export const confirmOrderRefund = async (id: number, payload: ConfirmOrderRefundReq, attachment?: File | null) => {
+  const form = new FormData()
+  form.append('refund_reference', payload.refund_reference)
+  form.append('reason', payload.reason)
+  if (attachment) form.append('attachment', attachment)
+  const response = await request.post(`/admin/orders/${id}/refund`, form) as ApiResponse<OrderModel>
   return response.data
+}
+
+export const fetchOrderRefundAttachment = async (id: number) => {
+  return await request.get(`/admin/orders/${id}/refund-attachment`, { responseType: 'blob' }) as unknown as Blob
 }
 
 export const fetchPaymentChannels = async (params: ListPaymentChannelsParams = {}) => {

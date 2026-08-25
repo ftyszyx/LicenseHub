@@ -4,7 +4,7 @@ use crate::core::response::ApiResponse;
 use crate::mailer::{EmailServiceConfig, send_email_code};
 use crate::utils::license_signing::{generate_private_key_b64, public_key_b64_from_private_key};
 use chrono::Utc;
-use data_model::system_settings;
+use data_model::{storage_channels, system_settings};
 use salvo::oapi::extract::JsonBody;
 use salvo::prelude::*;
 use sea_orm::{
@@ -22,6 +22,7 @@ pub const DISTRIBUTION_ATTRIBUTION_DAYS_KEY: &str = "distribution_attribution_da
 pub const DISTRIBUTION_HOLDING_DAYS_KEY: &str = "distribution_holding_days";
 pub const DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY: &str = "distribution_min_withdraw_cents";
 pub const REGISTRATION_ENABLED_KEY: &str = "registration_enabled";
+pub const RESOURCE_STORAGE_CHANNEL_ID_KEY: &str = "resource_storage_channel_id";
 const EMAIL_SERVICE_MODE_KEY: &str = "email_service_mode";
 const EMAIL_FROM_KEY: &str = "email_from";
 const EMAIL_SMTP_HOST_KEY: &str = "email_smtp_host";
@@ -34,6 +35,7 @@ const EMAIL_SMTP_TLS_MODE_KEY: &str = "email_smtp_tls_mode";
 pub struct SiteSettingsInfo {
     pub storefront_title: String,
     pub registration_enabled: bool,
+    pub resource_storage_channel_id: i32,
     pub distribution: DistributionSettingsInfo,
     pub license_signing: LicenseSigningInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,6 +79,7 @@ pub struct LicenseSigningInfo {
 pub struct UpdateSystemSettingsReq {
     pub storefront_title: String,
     pub registration_enabled: Option<bool>,
+    pub resource_storage_channel_id: Option<i32>,
     pub distribution_enabled: Option<bool>,
     pub distribution_referrer_binding_enabled: Option<bool>,
     pub distribution_default_rate_bps: Option<i32>,
@@ -175,6 +178,7 @@ pub async fn get_site_settings_impl(
             .await?
             .unwrap_or_else(|| DEFAULT_STOREFRONT_TITLE.to_string()),
         registration_enabled: get_registration_enabled(state).await?,
+        resource_storage_channel_id: get_resource_storage_channel_id(state).await?,
         distribution: get_distribution_settings(state).await?,
         license_signing: get_license_signing_info(state, include_private_key).await?,
         email: if include_private_key {
@@ -198,6 +202,10 @@ pub async fn update_system_settings_impl(
             ));
         }
         updates.push((REGISTRATION_ENABLED_KEY, value.to_string()));
+    }
+    if let Some(value) = req.resource_storage_channel_id {
+        validate_resource_storage_channel(state, value).await?;
+        updates.push((RESOURCE_STORAGE_CHANNEL_ID_KEY, value.to_string()));
     }
     if let Some(value) = req.distribution_enabled {
         updates.push((DISTRIBUTION_ENABLED_KEY, value.to_string()));
@@ -291,6 +299,33 @@ pub async fn get_distribution_settings(
 
 pub async fn get_registration_enabled(state: &AppState) -> Result<bool, AppError> {
     setting_bool(state, REGISTRATION_ENABLED_KEY, state.config.register_open).await
+}
+
+pub async fn get_resource_storage_channel_id(state: &AppState) -> Result<i32, AppError> {
+    setting_i32(state, RESOURCE_STORAGE_CHANNEL_ID_KEY, 0).await
+}
+
+async fn validate_resource_storage_channel(
+    state: &AppState,
+    channel_id: i32,
+) -> Result<(), AppError> {
+    if channel_id == 0 {
+        return Ok(());
+    }
+    if channel_id < 0 {
+        return Err(AppError::validation(
+            "resource_storage_channel_id must be 0 or a positive channel id",
+        ));
+    }
+    let channel = storage_channels::Entity::find_by_id(channel_id)
+        .one(&state.db)
+        .await?;
+    if channel.is_none_or(|value| value.status != 1) {
+        return Err(AppError::validation(
+            "resource storage channel must exist and be enabled",
+        ));
+    }
+    Ok(())
 }
 
 pub async fn get_email_service_config(state: &AppState) -> Result<EmailServiceConfig, AppError> {

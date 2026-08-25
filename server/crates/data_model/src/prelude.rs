@@ -13,11 +13,13 @@ pub use super::email_verification_challenges::Entity as EmailVerificationChallen
 pub use super::email_verification_tokens::Entity as EmailVerificationTokens;
 pub use super::license_plans::Entity as LicensePlans;
 pub use super::order_events::Entity as OrderEvents;
+pub use super::order_refund_attachments::Entity as OrderRefundAttachments;
 pub use super::order_refunds::Entity as OrderRefunds;
 pub use super::orders::Entity as Orders;
 pub use super::payment_channels::Entity as PaymentChannels;
 pub use super::permissions::Entity as Permissions;
 pub use super::reg_codes::Entity as RegCodes;
+pub use super::resources::Entity as Resources;
 pub use super::role_permissions::Entity as RolePermissions;
 pub use super::roles::Entity as Roles;
 pub use super::storage_channels::Entity as StorageChannels;

@@ -4,5 +4,6 @@ pub mod constants;
 pub mod my_error;
 pub mod rbac;
 pub mod redis_cache;
+pub mod resource_service;
 pub mod response;
 pub mod router;

@@ -344,14 +344,24 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
     .send(&ctx.app)
     .await;
     let revoke_json =
-        helpers::print_response_body_get_json(resp, "reject_paid_order_reg_code_revoke").await;
-    assert!(!revoke_json["success"].as_bool().unwrap());
-    assert!(
-        revoke_json["message"]
-            .as_str()
-            .unwrap()
-            .contains("ORDER_REFUND_REQUIRED")
-    );
+        helpers::print_response_body_get_json(resp, "revoke_paid_order_without_refund").await;
+    assert!(revoke_json["success"].as_bool().unwrap());
+    assert_eq!(revoke_json["data"]["status"].as_i64(), Some(4));
+
+    let order_status_before_refund: i16 =
+        sqlx::query_scalar("select status from orders where id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(order_status_before_refund, OrderStatus::Delivered as i16);
+    let refund_count: i64 =
+        sqlx::query_scalar("select count(*) from order_refunds where order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(refund_count, 0);
 
     let resp = TestClient::post(helpers::get_url(&format!(
         "/api/admin/orders/{order_id}/refund"

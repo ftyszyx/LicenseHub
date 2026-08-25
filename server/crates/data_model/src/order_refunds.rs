@@ -42,6 +42,8 @@ pub enum Relation {
         on_delete = "Restrict"
     )]
     Users,
+    #[sea_orm(has_one = "super::order_refund_attachments::Entity")]
+    OrderRefundAttachments,
 }
 
 impl Related<super::orders::Entity> for Entity {
@@ -53,6 +55,12 @@ impl Related<super::orders::Entity> for Entity {
 impl Related<super::users::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Users.def()
+    }
+}
+
+impl Related<super::order_refund_attachments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::OrderRefundAttachments.def()
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
+use crate::apis::system_settings_handler::get_resource_storage_channel_id;
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::response::ApiResponse;
@@ -252,6 +253,17 @@ pub async fn update_storage_channel_impl(
         None => normalize_storage_config(&final_provider, &channel.config)?,
     };
 
+    let resource_storage_channel_id = get_resource_storage_channel_id(state).await?;
+    if resource_storage_channel_id == id
+        && req
+            .status
+            .is_some_and(|status| status == StorageChannelStatus::Disabled)
+    {
+        return Err(AppError::validation(
+            "change the resource storage channel before disabling this channel",
+        ));
+    }
+
     let mut active = channel.into_active_model();
     if let Some(name) = req.name {
         active.name = Set(normalize_required_text(name, "name")?);
@@ -280,6 +292,11 @@ pub async fn delete_storage_channel(
         .one(&state.db)
         .await?
         .ok_or_else(|| AppError::not_found("storage_channels", Some(id)))?;
+    if get_resource_storage_channel_id(state).await? == id {
+        return Err(AppError::validation(
+            "change the resource storage channel before deleting this channel",
+        ));
+    }
     channel.into_active_model().delete(&state.db).await?;
     Ok(ApiResponse::success(()))
 }
@@ -537,6 +554,8 @@ async fn upload_manifest(
             config,
             object_key,
             body,
+            content_type: "application/json",
+            private: false,
         })
         .await
         .map_err(AppError::from)

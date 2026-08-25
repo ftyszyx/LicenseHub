@@ -1,5 +1,6 @@
 use crate::types::{
-    StorageAdapter, StorageChannelConfig, StorageError, UploadRequest, UploadResult, path_segment,
+    DeleteRequest, DownloadRequest, DownloadResult, StorageAdapter, StorageChannelConfig,
+    StorageError, UploadRequest, UploadResult, path_segment,
 };
 use async_trait::async_trait;
 use aws_credential_types::Credentials;
@@ -23,7 +24,21 @@ impl StorageAdapter for CloudflareR2Adapter {
     }
 
     async fn upload(&self, request: UploadRequest<'_>) -> Result<UploadResult, StorageError> {
-        upload_s3_compatible(request.config, request.object_key, request.body).await
+        upload_s3_compatible(
+            request.config,
+            request.object_key,
+            request.body,
+            request.content_type,
+        )
+        .await
+    }
+
+    async fn download(&self, request: DownloadRequest<'_>) -> Result<DownloadResult, StorageError> {
+        download_s3_compatible(request.config, request.object_key).await
+    }
+
+    async fn delete(&self, request: DeleteRequest<'_>) -> Result<(), StorageError> {
+        delete_s3_compatible(request.config, request.object_key).await
     }
 }
 
@@ -31,6 +46,7 @@ async fn upload_s3_compatible(
     config: &StorageChannelConfig,
     object_key: &str,
     body: &[u8],
+    content_type: &str,
 ) -> Result<UploadResult, StorageError> {
     let region = config.region.as_deref().unwrap_or("auto");
     let payload_sha256 = hex::encode(Sha256::digest(body));
@@ -58,7 +74,7 @@ async fn upload_s3_compatible(
         "PUT",
         &url,
         [
-            ("content-type", "application/json"),
+            ("content-type", content_type),
             ("x-amz-content-sha256", payload_sha256.as_str()),
         ]
         .into_iter(),
@@ -73,7 +89,12 @@ async fn upload_s3_compatible(
         })?
         .into_parts();
     let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str(content_type).map_err(|error| {
+            StorageError::Signature(format!("invalid content type header value: {error}"))
+        })?,
+    );
     headers.insert(
         HeaderName::from_static("x-amz-content-sha256"),
         HeaderValue::from_str(&payload_sha256).map_err(|error| {
@@ -110,6 +131,164 @@ async fn upload_s3_compatible(
         .and_then(|value| value.to_str().ok())
         .map(|value| value.trim_matches('"').to_string());
     Ok(UploadResult { etag })
+}
+
+async fn download_s3_compatible(
+    config: &StorageChannelConfig,
+    object_key: &str,
+) -> Result<DownloadResult, StorageError> {
+    let region = config.region.as_deref().unwrap_or("auto");
+    let payload_sha256 = hex::encode(Sha256::digest([]));
+    let url = build_s3_compatible_object_url(&config.endpoint, &config.bucket, object_key);
+    let credentials = Credentials::new(
+        config.access_key_id.clone(),
+        config.access_key_secret.clone(),
+        None,
+        None,
+        "licensehub",
+    );
+    let identity = credentials.into();
+    let params = v4::SigningParams::builder()
+        .identity(&identity)
+        .region(region)
+        .name("s3")
+        .time(SystemTime::now())
+        .settings(SigningSettings::default())
+        .build()
+        .map_err(|error| {
+            StorageError::Signature(format!("failed to build signing params: {error}"))
+        })?
+        .into();
+    let signable = SignableRequest::new(
+        "GET",
+        &url,
+        [("x-amz-content-sha256", payload_sha256.as_str())].into_iter(),
+        SignableBody::Bytes(&[]),
+    )
+    .map_err(|error| {
+        StorageError::Signature(format!("failed to build signable request: {error}"))
+    })?;
+    let (instructions, _signature) = sign(signable, &params)
+        .map_err(|error| {
+            StorageError::Signature(format!("failed to sign storage request: {error}"))
+        })?
+        .into_parts();
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-amz-content-sha256"),
+        HeaderValue::from_str(&payload_sha256).map_err(|error| {
+            StorageError::Signature(format!("invalid payload hash header value: {error}"))
+        })?,
+    );
+    for (name, value) in instructions.headers() {
+        headers.insert(
+            HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+                StorageError::Signature(format!("invalid signed header name: {error}"))
+            })?,
+            HeaderValue::from_str(value).map_err(|error| {
+                StorageError::Signature(format!("invalid signed header value: {error}"))
+            })?,
+        );
+    }
+    let response = reqwest::Client::new()
+        .get(url)
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|error| StorageError::Request(error.to_string()))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(StorageError::Response(format!(
+            "download failed with status {status}: {text}"
+        )));
+    }
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| {
+            StorageError::Response(format!("failed to read downloaded object: {error}"))
+        })?
+        .to_vec();
+    Ok(DownloadResult { body, content_type })
+}
+
+async fn delete_s3_compatible(
+    config: &StorageChannelConfig,
+    object_key: &str,
+) -> Result<(), StorageError> {
+    let region = config.region.as_deref().unwrap_or("auto");
+    let payload_sha256 = hex::encode(Sha256::digest([]));
+    let url = build_s3_compatible_object_url(&config.endpoint, &config.bucket, object_key);
+    let credentials = Credentials::new(
+        config.access_key_id.clone(),
+        config.access_key_secret.clone(),
+        None,
+        None,
+        "licensehub",
+    );
+    let identity = credentials.into();
+    let params = v4::SigningParams::builder()
+        .identity(&identity)
+        .region(region)
+        .name("s3")
+        .time(SystemTime::now())
+        .settings(SigningSettings::default())
+        .build()
+        .map_err(|error| {
+            StorageError::Signature(format!("failed to build signing params: {error}"))
+        })?
+        .into();
+    let signable = SignableRequest::new(
+        "DELETE",
+        &url,
+        [("x-amz-content-sha256", payload_sha256.as_str())].into_iter(),
+        SignableBody::Bytes(&[]),
+    )
+    .map_err(|error| {
+        StorageError::Signature(format!("failed to build signable request: {error}"))
+    })?;
+    let (instructions, _signature) = sign(signable, &params)
+        .map_err(|error| {
+            StorageError::Signature(format!("failed to sign storage request: {error}"))
+        })?
+        .into_parts();
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-amz-content-sha256"),
+        HeaderValue::from_str(&payload_sha256).map_err(|error| {
+            StorageError::Signature(format!("invalid payload hash header value: {error}"))
+        })?,
+    );
+    for (name, value) in instructions.headers() {
+        headers.insert(
+            HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+                StorageError::Signature(format!("invalid signed header name: {error}"))
+            })?,
+            HeaderValue::from_str(value).map_err(|error| {
+                StorageError::Signature(format!("invalid signed header value: {error}"))
+            })?,
+        );
+    }
+    let response = reqwest::Client::new()
+        .delete(url)
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|error| StorageError::Request(error.to_string()))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(StorageError::Response(format!(
+            "delete failed with status {status}: {text}"
+        )));
+    }
+    Ok(())
 }
 
 fn build_s3_compatible_object_url(endpoint: &str, bucket: &str, object_key: &str) -> String {
