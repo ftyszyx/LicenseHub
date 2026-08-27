@@ -110,6 +110,27 @@ async fn test_dashboard_stats_use_real_data() {
                     && order["status"].as_i64() == Some(OrderStatus::Delivered as i64)
             })
     );
+
+    let daily_trend = fetch_dashboard_trend(&ctx, "day", Some(plan_id)).await;
+    let daily_points = daily_trend["points"].as_array().unwrap();
+    assert_eq!(daily_points.len(), 30);
+    let today = daily_points.last().unwrap();
+    assert_eq!(today["revenue_cents"].as_i64(), Some(2599));
+    assert_eq!(today["order_count"].as_u64(), Some(1));
+
+    let monthly_trend = fetch_dashboard_trend(&ctx, "month", Some(plan_id)).await;
+    let monthly_points = monthly_trend["points"].as_array().unwrap();
+    assert_eq!(monthly_points.len(), 12);
+    let current_month = monthly_points.last().unwrap();
+    assert_eq!(current_month["revenue_cents"].as_i64(), Some(2599));
+    assert_eq!(current_month["order_count"].as_u64(), Some(1));
+
+    let yearly_trend = fetch_dashboard_trend(&ctx, "year", Some(plan_id)).await;
+    let yearly_points = yearly_trend["points"].as_array().unwrap();
+    assert_eq!(yearly_points.len(), 5);
+    let current_year = yearly_points.last().unwrap();
+    assert_eq!(current_year["revenue_cents"].as_i64(), Some(2599));
+    assert_eq!(current_year["order_count"].as_u64(), Some(1));
 }
 
 async fn fetch_dashboard(ctx: &helpers::TestContext) -> serde_json::Value {
@@ -119,6 +140,25 @@ async fn fetch_dashboard(ctx: &helpers::TestContext) -> serde_json::Value {
         .await;
     assert_eq!(resp.status_code, Some(StatusCode::OK));
     let json = helpers::print_response_body_get_json(resp, "dashboard_stats").await;
+    assert!(json["success"].as_bool().unwrap());
+    json["data"].clone()
+}
+
+async fn fetch_dashboard_trend(
+    ctx: &helpers::TestContext,
+    group_by: &str,
+    plan_id: Option<i32>,
+) -> serde_json::Value {
+    let mut url = format!("/api/admin/dashboard/trend?group_by={group_by}");
+    if let Some(plan_id) = plan_id {
+        url.push_str(&format!("&plan_id={plan_id}"));
+    }
+    let resp = TestClient::get(helpers::get_url(&url))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    let json = helpers::print_response_body_get_json(resp, "dashboard_trend").await;
     assert!(json["success"].as_bool().unwrap());
     json["data"].clone()
 }

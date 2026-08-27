@@ -1,4 +1,7 @@
 {
+  "api_errors": {
+    "REG_CODE_DEVICE_LIMIT_REACHED": "This activation code has reached its device limit"
+  },
   "products_page": {
     "title": "Our Products",
     "buy_now": "Buy Now",
@@ -167,7 +170,8 @@
     "revoked": "Code entitlement revoked",
     "status_locked": "Binded reg code status cannot be changed",
     "delete_locked": "Only unused reg codes can be deleted",
-    "device_id": ""
+    "device_id": "Device IDs",
+    "device_usage": "Bound / limit"
   },
   "products": {
     "input_name": "Enter name",
@@ -327,7 +331,24 @@
     "orders_note": "{count} new today",
     "new_orders_note": "Created after 00:00 today",
     "users_note": "All admin and registered users",
-    "products_note": "Currently purchasable plans"
+    "products_note": "Currently purchasable plans",
+    "trend_title": "Revenue and order trends",
+    "last_30_days": "Last 30 days, delivered orders only",
+    "last_12_months": "Last 12 months, delivered orders only",
+    "all_products": "All products",
+    "by_day": "Daily",
+    "by_month": "Monthly",
+    "by_year": "Yearly",
+    "period_values": "Period",
+    "cumulative_values": "Cumulative",
+    "bar_chart": "Bar",
+    "line_chart": "Line",
+    "start_date": "Start date",
+    "end_date": "End date",
+    "range_note": "{start} to {end}, delivered orders only",
+    "revenue_amount": "Revenue",
+    "order_count": "Orders",
+    "no_trend_data": "No delivered orders in this range"
   },
   "apps": {
     "input_name": "Enter name",
@@ -345,6 +366,8 @@
     "valid_key": "Secret key",
     "trial_days": "Trial days",
     "trial_num": "Trial num",
+    "max_devices": "Device limit",
+    "input_max_devices": "Device limit must be at least 1",
     "code_type": "Code type",
     "status": "Status",
     "enabled": "Enabled",

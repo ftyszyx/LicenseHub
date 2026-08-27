@@ -17,6 +17,8 @@ pub struct Model {
     pub binding_time: Option<DateTimeWithTimeZone>,
     pub code_type: i16,
     pub total_count: Option<i32>,
+    pub remaining_count: Option<i32>,
+    pub multi_device_enabled: bool,
     pub device_id: Option<i32>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
@@ -42,6 +44,8 @@ pub enum Relation {
     Apps,
     #[sea_orm(has_many = "super::orders::Entity")]
     Orders,
+    #[sea_orm(has_many = "super::reg_code_devices::Entity")]
+    RegCodeDevices,
 }
 
 impl Related<super::app_devices::Entity> for Entity {
@@ -59,6 +63,12 @@ impl Related<super::apps::Entity> for Entity {
 impl Related<super::orders::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Orders.def()
+    }
+}
+
+impl Related<super::reg_code_devices::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::RegCodeDevices.def()
     }
 }
 

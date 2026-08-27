@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-slate-950">{{ $t('dashboard.title') }}</h1>
         <p class="mt-1 text-sm text-slate-500">{{ $t('dashboard.subtitle') }}</p>
       </div>
-      <el-button :loading="loading" @click="reload">{{ $t('common.refresh') }}</el-button>
+      <el-button :loading="loading || trendLoading" @click="reload">{{ $t('common.refresh') }}</el-button>
     </div>
 
     <div v-loading="loading" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -22,6 +22,62 @@
         <p class="mt-3 text-xs text-slate-500">{{ item.note }}</p>
       </div>
     </div>
+
+    <el-card shadow="never">
+      <template #header>
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div class="font-medium text-slate-950">{{ $t('dashboard.trend_title') }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ trendRangeLabel }}</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <el-select v-model="selectedPlanId" class="w-56" :placeholder="$t('dashboard.all_products')">
+              <el-option :label="$t('dashboard.all_products')" :value="0" />
+              <el-option
+                v-for="product in trend.products"
+                :key="product.id"
+                :label="productLabel(product)"
+                :value="product.id"
+              />
+            </el-select>
+            <el-radio-group v-model="groupBy" size="small">
+              <el-radio-button value="day">{{ $t('dashboard.by_day') }}</el-radio-button>
+              <el-radio-button value="month">{{ $t('dashboard.by_month') }}</el-radio-button>
+              <el-radio-button value="year">{{ $t('dashboard.by_year') }}</el-radio-button>
+            </el-radio-group>
+            <el-date-picker
+              v-model="selectedRange"
+              :type="trendRangePickerType"
+              :format="trendRangePickerFormat"
+              :clearable="false"
+              unlink-panels
+              range-separator="-"
+              :start-placeholder="$t('dashboard.start_date')"
+              :end-placeholder="$t('dashboard.end_date')"
+              class="max-w-full"
+              @change="onTrendRangeChange"
+            />
+            <el-radio-group v-model="valueMode" size="small">
+              <el-radio-button value="period">{{ $t('dashboard.period_values') }}</el-radio-button>
+              <el-radio-button value="cumulative">{{ $t('dashboard.cumulative_values') }}</el-radio-button>
+            </el-radio-group>
+            <el-radio-group v-model="chartType" size="small">
+              <el-radio-button value="bar">{{ $t('dashboard.bar_chart') }}</el-radio-button>
+              <el-radio-button value="line">{{ $t('dashboard.line_chart') }}</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+      </template>
+      <div v-loading="trendLoading" class="min-h-[360px]">
+        <div v-show="hasTrendData" ref="trendChartElement" class="h-[360px] w-full"></div>
+        <el-empty
+          v-if="!trendLoading && !hasTrendData"
+          class="h-[360px]"
+          :description="$t('dashboard.no_trend_data')"
+          :image-size="90"
+        />
+      </div>
+    </el-card>
 
     <div class="grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
       <el-card shadow="never">
@@ -78,18 +134,57 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { fetchDashboardStats } from '@/apis/dashboard'
-import type { DashboardStats } from '@/types'
+import { BarChart, type BarSeriesOption, LineChart, type LineSeriesOption } from 'echarts/charts'
+import {
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  type GridComponentOption,
+  type LegendComponentOption,
+  type TooltipComponentOption,
+} from 'echarts/components'
+import { init, use, type ComposeOption, type EChartsType } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { fetchDashboardStats, fetchDashboardTrend } from '@/apis/dashboard'
+import type {
+  DashboardStats,
+  DashboardTrend,
+  DashboardTrendGroupBy,
+  DashboardTrendProduct,
+} from '@/types'
 import { OrderStatus } from '@/types/payments'
 import { RoutePath } from '@/types/route'
 import { formatTime } from '@/utils'
 
-const { t } = useI18n()
+type TrendValueMode = 'period' | 'cumulative'
+type TrendChartType = 'bar' | 'line'
+type TrendChartOption = ComposeOption<
+  BarSeriesOption
+  | LineSeriesOption
+  | GridComponentOption
+  | LegendComponentOption
+  | TooltipComponentOption
+>
+
+use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+
+const { t, locale } = useI18n()
 const router = useRouter()
 const loading = ref(false)
+const trendLoading = ref(false)
+const selectedPlanId = ref(0)
+const groupBy = ref<DashboardTrendGroupBy>('day')
+const selectedRange = ref<[Date, Date]>(defaultTrendRange('day'))
+const valueMode = ref<TrendValueMode>('period')
+const chartType = ref<TrendChartType>('bar')
+const trendChartElement = ref<HTMLElement>()
+const trend = reactive<DashboardTrend>({ points: [], products: [] })
+let trendChart: EChartsType | undefined
+let resizeObserver: ResizeObserver | undefined
+let trendRequestId = 0
 const stats = reactive<DashboardStats>({
   total_revenue_cents: 0,
   total_orders: 0,
@@ -100,6 +195,55 @@ const stats = reactive<DashboardStats>({
   failed_orders: 0,
   active_products: 0,
   recent_orders: [],
+})
+
+const trendRangeLabel = computed(() => {
+  const [start, end] = selectedRange.value
+  const options: Intl.DateTimeFormatOptions = groupBy.value === 'day'
+    ? { year: 'numeric', month: '2-digit', day: '2-digit' }
+    : groupBy.value === 'month'
+      ? { year: 'numeric', month: '2-digit' }
+      : { year: 'numeric' }
+  const formatter = new Intl.DateTimeFormat(locale.value, options)
+  return t('dashboard.range_note', {
+    start: formatter.format(start),
+    end: formatter.format(end),
+  })
+})
+
+const trendRangePickerType = computed(() => {
+  if (groupBy.value === 'day') return 'daterange'
+  if (groupBy.value === 'month') return 'monthrange'
+  return 'yearrange'
+})
+
+const trendRangePickerFormat = computed(() => {
+  if (groupBy.value === 'day') return 'YYYY-MM-DD'
+  if (groupBy.value === 'month') return 'YYYY-MM'
+  return 'YYYY'
+})
+
+const hasTrendData = computed(() => trend.points.some(
+  point => point.revenue_cents !== 0 || point.order_count !== 0,
+))
+
+const chartPoints = computed(() => {
+  let revenueCents = 0
+  let orderCount = 0
+  return trend.points.map((point) => {
+    if (valueMode.value === 'cumulative') {
+      revenueCents += point.revenue_cents
+      orderCount += point.order_count
+    } else {
+      revenueCents = point.revenue_cents
+      orderCount = point.order_count
+    }
+    return {
+      period: point.period,
+      revenue: revenueCents / 100,
+      orders: orderCount,
+    }
+  })
 })
 
 const summaryCards = computed(() => [
@@ -159,6 +303,110 @@ function formatPrice(cents: number) {
   return (cents / 100).toFixed(2)
 }
 
+function defaultTrendRange(value: DashboardTrendGroupBy): [Date, Date] {
+  const now = new Date()
+  if (value === 'year') {
+    return [
+      new Date(now.getFullYear() - 4, 0, 1),
+      new Date(now.getFullYear(), 0, 1),
+    ]
+  }
+  if (value === 'month') {
+    return [
+      new Date(now.getFullYear(), now.getMonth() - 11, 1),
+      new Date(now.getFullYear(), now.getMonth(), 1),
+    ]
+  }
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const start = new Date(end)
+  start.setDate(start.getDate() - 29)
+  return [start, end]
+}
+
+function formatDateForApi(value: Date) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function onTrendRangeChange() {
+  if (selectedRange.value.length === 2) void loadTrend()
+}
+
+function productLabel(product: DashboardTrendProduct) {
+  return product.app_name ? `${product.app_name} / ${product.name}` : product.name
+}
+
+function formatChartCurrency(value: number) {
+  return `¥${new Intl.NumberFormat(locale.value, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)}`
+}
+
+function renderTrendChart() {
+  void nextTick(() => {
+    if (!trendChartElement.value || !hasTrendData.value) return
+    if (!trendChart) trendChart = init(trendChartElement.value)
+    const points = chartPoints.value
+    const seriesStyle = chartType.value === 'bar'
+      ? { barMaxWidth: 34 }
+      : { smooth: true, showSymbol: false, symbolSize: 7 }
+    const option: TrendChartOption = {
+      animationDuration: 300,
+      color: ['#2563eb', '#16a34a'],
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0, left: 0 },
+      grid: { top: 52, right: 62, bottom: 30, left: 70, containLabel: false },
+      xAxis: {
+        type: 'category',
+        boundaryGap: chartType.value === 'bar',
+        data: points.map(point => point.period),
+        axisTick: { alignWithLabel: true },
+        axisLabel: {
+          hideOverlap: true,
+          formatter: (value: string) => groupBy.value === 'day' ? value.slice(5) : value,
+        },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: t('dashboard.revenue_amount'),
+          axisLabel: { formatter: (value: number) => `¥${value.toLocaleString()}` },
+          splitLine: { lineStyle: { color: '#e2e8f0' } },
+        },
+        {
+          type: 'value',
+          name: t('dashboard.order_count'),
+          minInterval: 1,
+          axisLabel: { formatter: (value: number) => value.toLocaleString() },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: t('dashboard.revenue_amount'),
+          type: chartType.value,
+          data: points.map(point => point.revenue),
+          yAxisIndex: 0,
+          tooltip: { valueFormatter: (value: any) => formatChartCurrency(Number(value)) },
+          ...seriesStyle,
+        } as BarSeriesOption | LineSeriesOption,
+        {
+          name: t('dashboard.order_count'),
+          type: chartType.value,
+          data: points.map(point => point.orders),
+          yAxisIndex: 1,
+          tooltip: { valueFormatter: (value: any) => String(value) },
+          ...seriesStyle,
+        } as BarSeriesOption | LineSeriesOption,
+      ],
+    }
+    trendChart.setOption(option, true)
+  })
+}
+
 function orderStatusLabel(status: OrderStatus) {
   return t(`orders.status_${status}`)
 }
@@ -182,7 +430,7 @@ function assignStats(data: DashboardStats) {
   stats.recent_orders = data.recent_orders
 }
 
-async function reload() {
+async function loadStats() {
   loading.value = true
   try {
     assignStats(await fetchDashboardStats())
@@ -191,9 +439,52 @@ async function reload() {
   }
 }
 
+async function loadTrend() {
+  const requestId = ++trendRequestId
+  trendLoading.value = true
+  try {
+    const [start, end] = selectedRange.value
+    const data = await fetchDashboardTrend({
+      group_by: groupBy.value,
+      plan_id: selectedPlanId.value || undefined,
+      start_date: formatDateForApi(start),
+      end_date: formatDateForApi(end),
+    })
+    if (requestId !== trendRequestId) return
+    trend.points = data.points
+    trend.products = data.products
+    renderTrendChart()
+  } finally {
+    if (requestId === trendRequestId) trendLoading.value = false
+  }
+}
+
+async function reload() {
+  await Promise.all([loadStats(), loadTrend()])
+}
+
 function goOrders() {
   router.push(RoutePath.AdminOrders)
 }
 
-onMounted(reload)
+watch(groupBy, (value) => {
+  selectedRange.value = defaultTrendRange(value)
+  void loadTrend()
+})
+watch(selectedPlanId, () => void loadTrend())
+watch([chartType, valueMode, locale], renderTrendChart)
+
+onMounted(async () => {
+  await nextTick()
+  if (trendChartElement.value) {
+    resizeObserver = new ResizeObserver(() => trendChart?.resize())
+    resizeObserver.observe(trendChartElement.value)
+  }
+  await reload()
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  trendChart?.dispose()
+})
 </script>

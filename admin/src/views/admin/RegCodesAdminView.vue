@@ -59,8 +59,13 @@
             <el-tag :type="statusTagType(row.status)" effect="light">{{ $t(`reg_codes.status_${RegCodeStatus[row.status].toLowerCase()}`) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="device_id_str" :label="$t('reg_codes.device_id')" min-width="180">
-          <template #default="{ row }">{{ row.device_id_str || '-' }}</template>
+        <el-table-column prop="device_id_str" :label="$t('reg_codes.device_id')" min-width="220">
+          <template #default="{ row }">
+            <span>{{ row.device_ids?.length ? row.device_ids.join(', ') : (row.device_id_str || '-') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('reg_codes.device_usage')" width="120">
+          <template #default="{ row }">{{ row.bound_device_count ?? (row.device_id ? 1 : 0) }}/{{ row.max_devices }}</template>
         </el-table-column>
         <el-table-column :label="$t('reg_codes.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>

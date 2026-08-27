@@ -1903,15 +1903,21 @@ async fn create_paid_reg_code(
     tx: &DatabaseTransaction,
     plan: &license_plans::Model,
 ) -> Result<reg_codes::Model, AppError> {
+    let app = apps::Entity::find_by_id(plan.app_id)
+        .one(tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("apps", Some(plan.app_id)))?;
     let now = Utc::now().fixed_offset();
     let active = reg_codes::ActiveModel {
         code: Set(new_reg_code()),
         app_id: Set(plan.app_id),
         valid_days: Set(plan.valid_days),
-        max_devices: Set(1),
+        max_devices: Set(app.max_devices),
         status: Set(i16::from(RegCodeStatus::Issued)),
         code_type: Set(plan.code_type),
         total_count: Set(plan.total_count),
+        remaining_count: Set((app.max_devices > 1).then_some(plan.total_count).flatten()),
+        multi_device_enabled: Set(app.max_devices > 1),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()

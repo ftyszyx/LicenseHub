@@ -11,8 +11,11 @@ export interface RegCodeModel {
   binding_time?: string | null
   code_type: RegCodeType
   total_count?: number | null
+  remaining_count?: number | null
   device_id?: number | null
   device_id_str?: string | null
+  device_ids?: string[]
+  bound_device_count?: number
   created_at: string
   updated_at: string
   app_name?: string | null

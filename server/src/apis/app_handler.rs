@@ -42,6 +42,7 @@ pub struct AddAppReq {
     pub app_valid_key: Option<String>,
     pub trial_days: Option<i32>,
     pub trial_num: Option<i32>,
+    pub max_devices: Option<i32>,
     pub sort_order: i32,
     pub status: i16,
 }
@@ -61,6 +62,7 @@ pub struct UpdateAppReq {
     pub app_valid_key: Option<String>,
     pub trial_days: Option<i32>,
     pub trial_num: Option<i32>,
+    pub max_devices: Option<i32>,
     pub sort_order: Option<i32>,
     pub status: Option<i16>,
 }
@@ -114,6 +116,7 @@ pub async fn add(
 pub async fn add_impl(state: &AppState, req: AddAppReq) -> Result<apps::Model, AppError> {
     let code_type = normalize_code_type(req.code_type)?;
     let (trial_days, trial_num) = normalize_trial_limits(code_type, req.trial_days, req.trial_num);
+    let max_devices = normalize_max_devices(req.max_devices)?;
     let manifest_extra = normalize_manifest_extra(req.manifest_extra)?;
     let website_url = normalize_website_url(req.website_url)?;
     let active_model = apps::ActiveModel {
@@ -130,6 +133,7 @@ pub async fn add_impl(state: &AppState, req: AddAppReq) -> Result<apps::Model, A
         app_valid_key: Set(req.app_valid_key.unwrap_or_default()),
         trial_days: Set(trial_days),
         trial_num: Set(trial_num),
+        max_devices: Set(max_devices),
         sort_order: Set(req.sort_order),
         status: Set(req.status),
         ..Default::default()
@@ -200,6 +204,9 @@ pub async fn update_impl(
     }
     app.trial_days = Set(final_trial_days);
     app.trial_num = Set(final_trial_num);
+    if let Some(v) = req.max_devices {
+        app.max_devices = Set(normalize_max_devices(Some(v))?);
+    }
     if let Some(v) = req.sort_order {
         app.sort_order = Set(v);
     }
@@ -216,6 +223,16 @@ fn normalize_code_type(value: Option<i16>) -> Result<i16, AppError> {
         1 => Ok(1),
         _ => Err(AppError::validation("code_type must be 0 or 1")),
     }
+}
+
+fn normalize_max_devices(value: Option<i32>) -> Result<i32, AppError> {
+    let value = value.unwrap_or(1);
+    if value < 1 {
+        return Err(AppError::validation(
+            "max_devices must be greater than or equal to 1",
+        ));
+    }
+    Ok(value)
 }
 
 fn normalize_website_url(value: Option<String>) -> Result<Option<String>, AppError> {

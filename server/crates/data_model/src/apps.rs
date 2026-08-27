@@ -24,6 +24,7 @@ pub struct Model {
     pub app_valid_key: String,
     pub trial_days: i32,
     pub trial_num: i32,
+    pub max_devices: i32,
     pub sort_order: i32,
     pub status: i16,
     pub created_at: DateTimeWithTimeZone,

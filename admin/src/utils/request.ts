@@ -2,6 +2,7 @@ import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from 'axio
 import { consoleError, consoleLog } from './log'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { i18n } from '@/utils/i18n'
 
 console.log("request", import.meta.env.VITE_BASE_URL || '/api')
 const instance = axios.create({
@@ -42,6 +43,17 @@ function shouldSuppressErrorMessage(config?: InternalAxiosRequestConfig) {
   return Boolean((config as UiRequestConfig | undefined)?.suppressErrorMessage)
 }
 
+function displayApiErrorMessage(message: string) {
+  const match = message.match(/^Business logic error \[([^\]]+)\]:\s*(.*)$/s)
+  if (!match) return message
+
+  const translationKey = `api_errors.${match[1]}`
+  if (i18n.global.te(translationKey)) {
+    return String(i18n.global.t(translationKey))
+  }
+  return match[2] || message
+}
+
 instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     consoleLog(`[request] ${config.method} ${config.baseURL}${config.url} \nData: ${JSON.stringify(sanitizeForLog(config.data))} \nParams: ${JSON.stringify(config.params)}`)
@@ -68,7 +80,7 @@ instance.interceptors.response.use(
     } else {
       const message = data.message
       if (!shouldSuppressErrorMessage(response.config)) {
-        ElMessage.error(message)
+        ElMessage.error(displayApiErrorMessage(message))
       }
       consoleError(message)
       return Promise.reject(message)

@@ -2,6 +2,9 @@
   "app": {
     "title": "AppPay 管理后台"
   },
+  "api_errors": {
+    "REG_CODE_DEVICE_LIMIT_REACHED": "该激活码绑定设备数量已达上限"
+  },
   "common": {
     "language": "语言",
     "lang_en": "英文",
@@ -89,7 +92,24 @@
     "orders_note": "今日新增 {count} 单",
     "new_orders_note": "今日 00:00 后创建",
     "users_note": "后台和注册用户总数",
-    "products_note": "当前可购买套餐数量"
+    "products_note": "当前可购买套餐数量",
+    "trend_title": "收入与订单趋势",
+    "last_30_days": "最近 30 天，仅统计已完成订单",
+    "last_12_months": "最近 12 个月，仅统计已完成订单",
+    "all_products": "全部产品",
+    "by_day": "按日",
+    "by_month": "按月",
+    "by_year": "按年",
+    "period_values": "当期",
+    "cumulative_values": "累计",
+    "bar_chart": "柱状图",
+    "line_chart": "折线图",
+    "start_date": "开始时间",
+    "end_date": "结束时间",
+    "range_note": "{start} 至 {end}，仅统计已完成订单",
+    "revenue_amount": "收入金额",
+    "order_count": "订单数",
+    "no_trend_data": "所选范围暂无已完成订单"
   },
   "users": {
     "title": "用户管理",
@@ -332,6 +352,8 @@
     "valid_key": "密钥",
     "trial_days": "试用天数",
     "trial_num": "试用次数",
+    "max_devices": "设备数上限",
+    "input_max_devices": "设备数上限不能小于 1",
     "code_type": "注册码类型",
     "title": "应用管理",
     "create_title": "新增应用",
@@ -411,7 +433,8 @@
     "revoked": "注册码授权已撤销",
     "status_locked": "已绑定的注册码不允许修改状态",
     "delete_locked": "仅未使用的注册码允许删除",
-    "device_id": "设备ID"
+    "device_id": "设备ID",
+    "device_usage": "已绑定/上限"
   },
   "permissions": {
     "policy_add": "添加策略",

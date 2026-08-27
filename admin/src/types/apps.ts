@@ -14,6 +14,7 @@ export interface AppModel {
     app_valid_key: string
     trial_days: number
     trial_num: number
+    max_devices: number
     sort_order: number
     manifest_extra?: Record<string, unknown> | null
     manifest_urls?: AppManifestUrl[]
@@ -42,6 +43,7 @@ export interface AddAppReq {
     app_valid_key?: string | null
     trial_days?: number | null
     trial_num?: number | null
+    max_devices?: number | null
     sort_order: number
     manifest_extra?: Record<string, unknown>
     status: number
@@ -69,6 +71,7 @@ export interface UpdateAppReq {
     app_valid_key?: string | null
     trial_days?: number | null
     trial_num?: number | null
+    max_devices?: number | null
     sort_order?: number
     manifest_extra?: Record<string, unknown>
     status?: number

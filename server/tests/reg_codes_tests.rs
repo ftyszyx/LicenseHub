@@ -1218,3 +1218,224 @@ async fn test_count_reg_code_activation_and_exhaust() {
     let json = print_response_body_get_json(resp, "validate_count_second").await;
     assert!(!json["success"].as_bool().unwrap());
 }
+
+async fn create_multi_device_app(
+    ctx: &helpers::TestContext,
+    code_type: i16,
+    label: &str,
+) -> (i32, String) {
+    let app_key = helpers::unique_name(&format!("{label}KEY"));
+    let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "name": helpers::unique_name(&format!("{label}App")),
+            "app_id": helpers::unique_name(&format!("com.{label}.app")),
+            "app_vername": "1.0.0",
+            "app_vercode": 1,
+            "app_download_url": "https://example.com/dl",
+            "app_res_url": "https://example.com/res",
+            "app_update_info": "",
+            "app_valid_key": app_key,
+            "code_type": code_type,
+            "trial_days": 0,
+            "trial_num": 0,
+            "max_devices": 2,
+            "sort_order": 0,
+            "status": 1
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_multi_device_app").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["max_devices"].as_i64(), Some(2));
+    (json["data"]["id"].as_i64().unwrap() as i32, app_key)
+}
+
+#[tokio::test]
+async fn test_time_reg_code_binds_up_to_app_device_limit_and_revokes_all_devices() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
+
+    let (app_id, app_key) = create_multi_device_app(&ctx, 0, "MultiTime").await;
+    let code = helpers::unique_name("MULTI_TIME_CODE");
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "code": code,
+            "app_id": app_id,
+            "valid_days": 7,
+            "status": 0,
+            "code_type": 0
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_multi_time_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["max_devices"].as_i64(), Some(2));
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let device_ids = [
+        helpers::unique_name("multi-time-device-1"),
+        helpers::unique_name("multi-time-device-2"),
+    ];
+    for device_id in &device_ids {
+        let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+            .add_header("content-type", "application/json", true)
+            .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_id}))
+            .send(&ctx.app)
+            .await;
+        let json = print_response_body_get_json(resp, "bind_multi_time_device").await;
+        assert!(json["success"].as_bool().unwrap());
+        assert!(json["data"]["expire_time"].as_i64().unwrap() > chrono::Utc::now().timestamp());
+    }
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "app_key": app_key,
+            "reg_code": code,
+            "device_id": helpers::unique_name("multi-time-device-3")
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "reject_third_time_device").await;
+    assert!(!json["success"].as_bool().unwrap());
+
+    let resp = TestClient::get(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{reg_code_id}"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "get_multi_time_code").await;
+    assert_eq!(json["data"]["bound_device_count"].as_u64(), Some(2));
+    assert_eq!(json["data"]["device_ids"].as_array().unwrap().len(), 2);
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{reg_code_id}/revoke"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "revoke_multi_time_code").await;
+    assert!(json["success"].as_bool().unwrap());
+
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    let devices: Vec<(Option<chrono::DateTime<chrono::FixedOffset>>, Option<i32>)> =
+        sqlx::query_as(
+            "select expire_time, remaining from app_devices where app_id = $1 and device_id = any($2)",
+        )
+        .bind(app_id)
+        .bind(&device_ids)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(devices.len(), 2);
+    for (expire_time, remaining) in devices {
+        assert!(expire_time.unwrap().timestamp() <= chrono::Utc::now().timestamp());
+        assert_eq!(remaining, Some(0));
+    }
+}
+
+#[tokio::test]
+async fn test_count_reg_code_shares_balance_across_devices_and_revokes_all_devices() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
+
+    let (app_id, app_key) = create_multi_device_app(&ctx, 1, "MultiCount").await;
+    let code = helpers::unique_name("MULTI_COUNT_CODE");
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "code": code,
+            "app_id": app_id,
+            "valid_days": 0,
+            "status": 0,
+            "code_type": 1,
+            "total_count": 5
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_multi_count_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let device_ids = [
+        helpers::unique_name("multi-count-device-1"),
+        helpers::unique_name("multi-count-device-2"),
+    ];
+    for device_id in &device_ids {
+        let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+            .add_header("content-type", "application/json", true)
+            .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_id}))
+            .send(&ctx.app)
+            .await;
+        let json = print_response_body_get_json(resp, "bind_multi_count_device").await;
+        assert!(json["success"].as_bool().unwrap());
+        assert_eq!(json["data"]["remain_count"].as_i64(), Some(5));
+    }
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/usecount"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "device_id": device_ids[0], "use_count": 2}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "use_shared_count_on_first_device").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64(), Some(3));
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/check"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "device_id": device_ids[1]}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "check_shared_count_on_second_device").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64(), Some(3));
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "app_key": app_key,
+            "reg_code": code,
+            "device_id": helpers::unique_name("multi-count-device-3")
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "reject_third_count_device").await;
+    assert!(!json["success"].as_bool().unwrap());
+
+    let resp = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{reg_code_id}/revoke"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "revoke_multi_count_code").await;
+    assert!(json["success"].as_bool().unwrap());
+
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    let remaining_count: Option<i32> =
+        sqlx::query_scalar("select remaining_count from reg_codes where id = $1")
+            .bind(reg_code_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining_count, Some(0));
+    let device_remaining: Vec<Option<i32>> = sqlx::query_scalar(
+        "select remaining from app_devices where app_id = $1 and device_id = any($2)",
+    )
+    .bind(app_id)
+    .bind(&device_ids)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(device_remaining, vec![Some(0), Some(0)]);
+}

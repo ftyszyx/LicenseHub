@@ -18,6 +18,7 @@ pub use super::order_refunds::Entity as OrderRefunds;
 pub use super::orders::Entity as Orders;
 pub use super::payment_channels::Entity as PaymentChannels;
 pub use super::permissions::Entity as Permissions;
+pub use super::reg_code_devices::Entity as RegCodeDevices;
 pub use super::reg_codes::Entity as RegCodes;
 pub use super::resources::Entity as Resources;
 pub use super::role_permissions::Entity as RolePermissions;

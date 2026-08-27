@@ -251,6 +251,7 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;
     ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
 
     let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
     sqlx::query(
@@ -264,6 +265,7 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
         .await
         .unwrap();
 
+    let app_key = helpers::unique_name("REFUNDKEY");
     let resp = TestClient::post(helpers::get_url("/api/admin/apps"))
         .add_header("authorization", helpers::bearer(&ctx.token), true)
         .add_header("content-type", "application/json", true)
@@ -275,8 +277,9 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
             "app_download_url": "https://example.com/dl",
             "app_res_url": "https://example.com/res",
             "app_update_info": "",
-            "app_valid_key": helpers::unique_name("REFUNDKEY"),
+            "app_valid_key": app_key,
             "trial_days": 0,
+            "max_devices": 2,
             "sort_order": 0,
             "status": 1
         }))
@@ -336,6 +339,28 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
         .fetch_one(&pool)
         .await
         .unwrap();
+    let reg_code: String = sqlx::query_scalar("select code from reg_codes where id = $1")
+        .bind(reg_code_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let bound_devices = [
+        helpers::unique_name("refund-device-1"),
+        helpers::unique_name("refund-device-2"),
+    ];
+    for device_id in &bound_devices {
+        let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+            .add_header("content-type", "application/json", true)
+            .json(&json!({
+                "app_key": app_key,
+                "reg_code": reg_code,
+                "device_id": device_id
+            }))
+            .send(&ctx.app)
+            .await;
+        let json = helpers::print_response_body_get_json(resp, "bind_refund_device").await;
+        assert!(json["success"].as_bool().unwrap());
+    }
 
     let resp = TestClient::post(helpers::get_url(&format!(
         "/api/admin/reg_codes/{reg_code_id}/revoke"
@@ -362,6 +387,17 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
             .await
             .unwrap();
     assert_eq!(refund_count, 0);
+
+    // Recreate device-side authorization to prove that the refund path clears
+    // every historical binding even after a prior standalone revocation.
+    sqlx::query(
+        "update app_devices set expire_time = now() + interval '30 days', remaining = 9 where app_id = $1 and device_id = any($2)",
+    )
+    .bind(app_id)
+    .bind(&bound_devices)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let resp = TestClient::post(helpers::get_url(&format!(
         "/api/admin/orders/{order_id}/refund"
@@ -414,6 +450,21 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
         .await
         .unwrap();
     assert_eq!(reg_code_status, 3);
+
+    let revoked_devices: Vec<(Option<chrono::DateTime<chrono::FixedOffset>>, Option<i32>)> =
+        sqlx::query_as(
+            "select expire_time, remaining from app_devices where app_id = $1 and device_id = any($2)",
+        )
+        .bind(app_id)
+        .bind(&bound_devices)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(revoked_devices.len(), 2);
+    for (expire_time, remaining) in revoked_devices {
+        assert!(expire_time.unwrap().timestamp() <= chrono::Utc::now().timestamp());
+        assert_eq!(remaining, Some(0));
+    }
 
     let refund_event_count: i64 = sqlx::query_scalar(
         "select count(*) from order_events where order_id = $1 and event_type = 'refund.confirmed'",

@@ -69,6 +69,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("dashboard", "READ"))
                 .get(apis::dashboard_handler::get_dashboard_stats),
         )
+        .push(
+            Router::with_path("dashboard/trend")
+                .hoop(RequirePerm::new("dashboard", "READ"))
+                .get(apis::dashboard_handler::get_dashboard_trend),
+        )
         //permissions
         .push(
             Router::with_path("permissions/list")

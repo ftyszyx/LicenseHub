@@ -17,6 +17,7 @@ pub mod orders;
 pub mod payment_channels;
 pub mod permissions;
 pub mod prelude;
+pub mod reg_code_devices;
 pub mod reg_codes;
 pub mod resources;
 pub mod role_permissions;

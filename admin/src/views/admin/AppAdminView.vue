@@ -183,6 +183,9 @@
                   <el-form-item v-if="form.code_type === RegCodeType.Count" :label="$t('apps.trial_num')" prop="trial_num">
                     <el-input-number v-model.number="form.trial_num" :min="0" class="w-full" />
                   </el-form-item>
+                  <el-form-item :label="$t('apps.max_devices')" prop="max_devices">
+                    <el-input-number v-model.number="form.max_devices" :min="1" class="w-full" />
+                  </el-form-item>
                   <el-form-item :label="$t('apps.sort_order')" prop="sort_order">
                     <el-input-number v-model="form.sort_order" :min="0" class="w-full" />
                   </el-form-item>
@@ -499,6 +502,7 @@ const emptyForm: AddAppReq = {
   app_valid_key: '',
   trial_days: 0,
   trial_num: 0,
+  max_devices: 1,
   sort_order: 0,
   status: 1,
 }
@@ -514,6 +518,7 @@ const rules = reactive<FormRules<AddAppReq>>({
   app_vername: [{ required: true, message: t('apps.input_version_name'), trigger: 'blur' }],
   app_vercode: [{ required: true, message: t('apps.input_version_code'), trigger: 'blur' }],
   website_url: [{ validator: validateWebsiteUrl, trigger: 'blur' }],
+  max_devices: [{ required: true, message: t('apps.input_max_devices'), trigger: 'change' }],
 })
 
 const appDialogFieldTabs: Record<string, AppDialogTab> = {
@@ -521,6 +526,7 @@ const appDialogFieldTabs: Record<string, AppDialogTab> = {
   app_id: 'basic',
   website_url: 'basic',
   app_valid_key: 'basic',
+  max_devices: 'basic',
   app_vername: 'version',
   app_vercode: 'version',
 }
@@ -707,6 +713,7 @@ const openEdit = (row: AppModel) => {
     app_valid_key: row.app_valid_key || '',
     trial_days: row.trial_days ?? 0,
     trial_num: row.trial_num ?? 0,
+    max_devices: row.max_devices ?? 1,
     sort_order: row.sort_order,
     status: row.status,
   })

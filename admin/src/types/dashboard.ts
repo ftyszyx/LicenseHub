@@ -21,3 +21,29 @@ export interface DashboardStats {
   active_products: number
   recent_orders: DashboardRecentOrder[]
 }
+
+export type DashboardTrendGroupBy = 'day' | 'month' | 'year'
+
+export interface DashboardTrendParams {
+  group_by: DashboardTrendGroupBy
+  plan_id?: number
+  start_date?: string
+  end_date?: string
+}
+
+export interface DashboardTrendPoint {
+  period: string
+  revenue_cents: number
+  order_count: number
+}
+
+export interface DashboardTrendProduct {
+  id: number
+  name: string
+  app_name?: string | null
+}
+
+export interface DashboardTrend {
+  points: DashboardTrendPoint[]
+  products: DashboardTrendProduct[]
+}

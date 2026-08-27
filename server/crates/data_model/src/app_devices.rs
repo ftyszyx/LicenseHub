@@ -30,6 +30,8 @@ pub enum Relation {
     Apps,
     #[sea_orm(has_many = "super::reg_codes::Entity")]
     RegCodes,
+    #[sea_orm(has_many = "super::reg_code_devices::Entity")]
+    RegCodeDevices,
 }
 
 impl Related<super::apps::Entity> for Entity {
@@ -41,6 +43,12 @@ impl Related<super::apps::Entity> for Entity {
 impl Related<super::reg_codes::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::RegCodes.def()
+    }
+}
+
+impl Related<super::reg_code_devices::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::RegCodeDevices.def()
     }
 }
 

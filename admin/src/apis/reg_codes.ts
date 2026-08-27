@@ -51,7 +51,6 @@ export const batchCreateRegCodes = async (payload: BatchCreateRegCodesReq) => {
       app_id: payload.app_id,
       status: 0,
       valid_days: payload.code_type === 0 ? (payload.valid_days ?? 0) : 0,
-      max_devices: 1,
       code_type: payload.code_type,
       expire_time: null,
       total_count: payload.code_type === 1 ? (payload.total_count ?? 1) : null,
