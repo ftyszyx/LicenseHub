@@ -17,6 +17,7 @@ use sea_orm::{
     IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use validator::Validate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -277,17 +278,50 @@ impl TryFrom<reg_codes::Model> for RegCodeInfo {
 
 async fn enrich_reg_code_devices(
     state: &AppState,
-    mut info: RegCodeInfo,
+    info: RegCodeInfo,
 ) -> Result<RegCodeInfo, AppError> {
+    let reg_code_id = info.id;
+    let mut devices_by_reg_code = load_reg_code_device_ids(&state.db, &[reg_code_id]).await?;
+    Ok(with_reg_code_devices(
+        info,
+        devices_by_reg_code.remove(&reg_code_id).unwrap_or_default(),
+    ))
+}
+
+async fn load_reg_code_device_ids<C>(
+    db: &C,
+    reg_code_ids: &[i32],
+) -> Result<HashMap<i32, Vec<String>>, AppError>
+where
+    C: ConnectionTrait,
+{
+    if reg_code_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let rows = reg_code_devices::Entity::find()
-        .filter(reg_code_devices::Column::RegCodeId.eq(info.id))
+        .filter(reg_code_devices::Column::RegCodeId.is_in(reg_code_ids.to_vec()))
         .find_also_related(app_devices::Entity)
-        .all(&state.db)
+        .all(db)
         .await?;
-    let mut device_ids = rows
-        .into_iter()
-        .filter_map(|(_, device)| device.map(|value| value.device_id))
-        .collect::<Vec<_>>();
+
+    let mut devices_by_reg_code = HashMap::<i32, Vec<String>>::new();
+    for (binding, device) in rows {
+        if let Some(device) = device {
+            devices_by_reg_code
+                .entry(binding.reg_code_id)
+                .or_default()
+                .push(device.device_id);
+        }
+    }
+    for device_ids in devices_by_reg_code.values_mut() {
+        device_ids.sort();
+        device_ids.dedup();
+    }
+    Ok(devices_by_reg_code)
+}
+
+fn with_reg_code_devices(mut info: RegCodeInfo, mut device_ids: Vec<String>) -> RegCodeInfo {
     device_ids.sort();
     device_ids.dedup();
     if device_ids.is_empty() {
@@ -298,7 +332,7 @@ async fn enrich_reg_code_devices(
     info.bound_device_count = device_ids.len() as u64;
     info.device_id_str = device_ids.first().cloned();
     info.device_ids = device_ids;
-    Ok(info)
+    info
 }
 
 // Create RegCode
@@ -380,7 +414,11 @@ pub async fn update_impl(
     id: i32,
     req: UpdateRegCodeReq,
 ) -> Result<RegCodeInfo, AppError> {
-    let reg_code = reg_codes::Entity::find_by_id(id).one(&state.db).await?;
+    let tx = state.db.begin().await?;
+    let reg_code = reg_codes::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&tx)
+        .await?;
     let reg_code =
         reg_code.ok_or_else(|| AppError::not_found("reg_codes".to_string(), Some(id)))?;
     if matches!(
@@ -398,8 +436,45 @@ pub async fn update_impl(
         .unwrap_or_else(|| CodeType::from(reg_code.code_type));
     let final_valid_days = req.valid_days.unwrap_or(reg_code.valid_days);
     let final_total_count = req.total_count.or(reg_code.total_count);
-    let refresh_shared_remaining = reg_code.multi_device_enabled
-        && RegCodeStatus::from(reg_code.status) != RegCodeStatus::Binded;
+    let mut final_multi_device_enabled = reg_code.multi_device_enabled;
+    if let Some(max_devices) = req.max_devices {
+        if max_devices < 1 {
+            return Err(AppError::validation(
+                "max_devices must be greater than or equal to 1",
+            ));
+        }
+
+        let mut bound_device_ids = reg_code_devices::Entity::find()
+            .filter(reg_code_devices::Column::RegCodeId.eq(reg_code.id))
+            .select_only()
+            .column(reg_code_devices::Column::DeviceId)
+            .into_tuple::<i32>()
+            .all(&tx)
+            .await?;
+        if let Some(device_id) = reg_code.device_id {
+            bound_device_ids.push(device_id);
+        }
+        bound_device_ids.sort_unstable();
+        bound_device_ids.dedup();
+
+        if max_devices < bound_device_ids.len() as i32 {
+            return Err(AppError::validation(
+                "max_devices cannot be lower than the current bound device count",
+            ));
+        }
+
+        let requested_multi_device_enabled = max_devices > 1;
+        let has_binding = !bound_device_ids.is_empty()
+            || RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded;
+        if requested_multi_device_enabled != reg_code.multi_device_enabled && has_binding {
+            return Err(AppError::validation(
+                "cannot switch single-device and multi-device mode after reg code is bound",
+            ));
+        }
+        final_multi_device_enabled = requested_multi_device_enabled;
+    }
+    let refresh_shared_remaining =
+        final_multi_device_enabled && RegCodeStatus::from(reg_code.status) != RegCodeStatus::Binded;
     let (code_type, valid_days, total_count, _) = normalize_reg_code_limits_for_app(
         state,
         final_app_id,
@@ -416,12 +491,8 @@ pub async fn update_impl(
     reg_code.app_id = Set(final_app_id);
     reg_code.valid_days = Set(valid_days);
     if let Some(v) = req.max_devices {
-        if v < 1 {
-            return Err(AppError::validation(
-                "max_devices must be greater than or equal to 1",
-            ));
-        }
         reg_code.max_devices = Set(v);
+        reg_code.multi_device_enabled = Set(final_multi_device_enabled);
     }
     if let Some(v) = req.status {
         let status = RegCodeStatus::from(v);
@@ -439,10 +510,13 @@ pub async fn update_impl(
     reg_code.total_count = Set(total_count);
     if refresh_shared_remaining {
         reg_code.remaining_count = Set(total_count);
+    } else if !final_multi_device_enabled {
+        reg_code.remaining_count = Set(None);
     }
     reg_code.updated_at = Set(Utc::now().fixed_offset());
 
-    let updated_reg_code = reg_code.update(&state.db).await?;
+    let updated_reg_code = reg_code.update(&tx).await?;
+    tx.commit().await?;
 
     // Fetch with app information for response
     let result = reg_codes::Entity::find_by_id(updated_reg_code.id)
@@ -751,10 +825,19 @@ pub async fn get_list_impl(
     let total = paginator.num_items().await.unwrap_or(0);
     let results = paginator.fetch_page(page - 1).await?;
 
+    let reg_code_ids = results
+        .iter()
+        .map(|(reg_code, _, _)| reg_code.id)
+        .collect::<Vec<_>>();
+    let mut devices_by_reg_code = load_reg_code_device_ids(&state.db, &reg_code_ids).await?;
     let mut list = Vec::with_capacity(results.len());
     for (reg_code, app, device) in results {
+        let reg_code_id = reg_code.id;
         let info = RegCodeInfo::try_from((reg_code, app, device))?;
-        list.push(enrich_reg_code_devices(state, info).await?);
+        list.push(with_reg_code_devices(
+            info,
+            devices_by_reg_code.remove(&reg_code_id).unwrap_or_default(),
+        ));
     }
 
     Ok(PagingResponse { list, total, page })

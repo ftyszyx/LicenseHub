@@ -1253,6 +1253,78 @@ async fn create_multi_device_app(
 }
 
 #[tokio::test]
+async fn test_unbound_count_reg_code_can_switch_to_multi_device_mode() {
+    let _lock = helpers::db_lock().await;
+    let mut ctx = helpers::create_test_context().await;
+    ctx.login_default_user().await;
+    helpers::seed_test_license_signing_key(&ctx).await;
+
+    let (app_id, app_key) = create_multi_device_app(&ctx, 1, "UpdateMultiCount").await;
+    let code = helpers::unique_name("UPDATE_MULTI_COUNT_CODE");
+    let resp = TestClient::post(helpers::get_url("/api/admin/reg_codes"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({
+            "code": code,
+            "app_id": app_id,
+            "valid_days": 0,
+            "max_devices": 1,
+            "status": 0,
+            "code_type": 1,
+            "total_count": 5
+        }))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "create_single_device_count_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert!(json["data"]["remaining_count"].is_null());
+    let reg_code_id = json["data"]["id"].as_i64().unwrap();
+
+    let resp = TestClient::put(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{reg_code_id}"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({"max_devices": 2}))
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "enable_multi_device_count_code").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["max_devices"].as_i64(), Some(2));
+    assert_eq!(json["data"]["remaining_count"].as_i64(), Some(5));
+
+    let first_device = helpers::unique_name("update-multi-count-device-1");
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": first_device}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "bind_updated_multi_count_first").await;
+    assert!(json["success"].as_bool().unwrap());
+
+    let resp = TestClient::put(helpers::get_url(&format!(
+        "/api/admin/reg_codes/{reg_code_id}"
+    )))
+    .add_header("authorization", helpers::bearer(&ctx.token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({"max_devices": 1}))
+    .send(&ctx.app)
+    .await;
+    let json = print_response_body_get_json(resp, "reject_bound_device_mode_switch").await;
+    assert!(!json["success"].as_bool().unwrap());
+
+    let second_device = helpers::unique_name("update-multi-count-device-2");
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": second_device}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "bind_updated_multi_count_second").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64(), Some(5));
+}
+
+#[tokio::test]
 async fn test_time_reg_code_binds_up_to_app_device_limit_and_revokes_all_devices() {
     let _lock = helpers::db_lock().await;
     let mut ctx = helpers::create_test_context().await;

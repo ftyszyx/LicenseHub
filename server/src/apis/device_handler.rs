@@ -5,8 +5,9 @@ use crate::core::response::ApiResponse;
 use data_model::{app_devices, apps, reg_code_devices, reg_codes};
 use salvo::prelude::*;
 use salvo_oapi::ToSchema;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct DeviceInfo {
@@ -39,20 +40,27 @@ impl TryFrom<(app_devices::Model, Option<apps::Model>)> for DeviceInfo {
     }
 }
 
-async fn enrich_shared_remaining(
+async fn enrich_shared_remaining_batch(
     state: &AppState,
-    mut info: DeviceInfo,
-) -> Result<DeviceInfo, AppError> {
-    let reg_code_ids = reg_code_devices::Entity::find()
-        .filter(reg_code_devices::Column::DeviceId.eq(info.id))
-        .select_only()
-        .column(reg_code_devices::Column::RegCodeId)
-        .into_tuple::<i32>()
+    infos: &mut [DeviceInfo],
+) -> Result<(), AppError> {
+    if infos.is_empty() {
+        return Ok(());
+    }
+
+    let device_ids = infos.iter().map(|info| info.id).collect::<Vec<_>>();
+    let bindings = reg_code_devices::Entity::find()
+        .filter(reg_code_devices::Column::DeviceId.is_in(device_ids))
         .all(&state.db)
         .await?;
-    if reg_code_ids.is_empty() {
-        return Ok(info);
+    if bindings.is_empty() {
+        return Ok(());
     }
+
+    let reg_code_ids = bindings
+        .iter()
+        .map(|binding| binding.reg_code_id)
+        .collect::<HashSet<_>>();
     let shared_codes = reg_codes::Entity::find()
         .filter(reg_codes::Column::Id.is_in(reg_code_ids))
         .filter(reg_codes::Column::MultiDeviceEnabled.eq(true))
@@ -60,15 +68,26 @@ async fn enrich_shared_remaining(
         .filter(reg_codes::Column::CodeType.eq(1))
         .all(&state.db)
         .await?;
-    let has_shared_entitlement = !shared_codes.is_empty();
-    let shared_remaining: i32 = shared_codes
+
+    let remaining_by_reg_code = shared_codes
         .into_iter()
-        .map(|reg_code| reg_code.remaining_count.unwrap_or(0).max(0))
-        .sum();
-    if has_shared_entitlement {
-        info.remaining = Some(info.remaining.unwrap_or(0).max(0) + shared_remaining);
+        .map(|reg_code| (reg_code.id, reg_code.remaining_count.unwrap_or(0).max(0)))
+        .collect::<HashMap<_, _>>();
+    let mut shared_remaining_by_device = HashMap::<i32, i32>::new();
+    for binding in bindings {
+        if let Some(remaining) = remaining_by_reg_code.get(&binding.reg_code_id) {
+            *shared_remaining_by_device
+                .entry(binding.device_id)
+                .or_default() += remaining;
+        }
     }
-    Ok(info)
+
+    for info in infos {
+        if let Some(shared_remaining) = shared_remaining_by_device.get(&info.id) {
+            info.remaining = Some(info.remaining.unwrap_or(0).max(0) + shared_remaining);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -106,10 +125,10 @@ pub async fn get_list_impl(
     let paginator = query.paginate(&state.db, page_size);
     let total = paginator.num_items().await.unwrap_or(0);
     let result = paginator.fetch_page(page - 1).await?;
-    let mut list = Vec::with_capacity(result.len());
-    for item in result {
-        let info = DeviceInfo::try_from(item)?;
-        list.push(enrich_shared_remaining(state, info).await?);
-    }
+    let mut list = result
+        .into_iter()
+        .map(DeviceInfo::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+    enrich_shared_remaining_batch(state, &mut list).await?;
     Ok(PagingResponse { list, total, page })
 }
