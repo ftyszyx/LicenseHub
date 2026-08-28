@@ -150,20 +150,80 @@
           </el-descriptions>
         </el-card>
       </el-col>
+
+      <el-col :xs="24" :xl="8">
+        <el-card shadow="never" class="h-full">
+          <template #header>
+            <span class="font-medium">{{ $t('reg_test.test_orders_title') }}</span>
+          </template>
+
+          <el-form label-width="100px">
+            <el-form-item :label="$t('reg_test.product')">
+              <el-select v-model.number="testOrderForm.plan_id" filterable class="w-full">
+                <el-option
+                  v-for="plan in planOptions"
+                  :key="plan.id"
+                  :label="planOptionLabel(plan)"
+                  :value="plan.id"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item :label="$t('reg_test.order_quantity')">
+              <el-input-number
+                v-model="testOrderForm.quantity"
+                :min="1"
+                :max="1000"
+                :step="1"
+                step-strictly
+                class="w-full"
+              />
+            </el-form-item>
+
+            <el-form-item :label="$t('reg_test.order_month')">
+              <el-date-picker
+                v-model="testOrderForm.month"
+                type="month"
+                value-format="YYYY-MM"
+                :clearable="false"
+                :disabled-date="disableFutureMonth"
+                class="w-full"
+              />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button type="primary" :loading="testOrderLoading" @click="submitTestOrders">
+                {{ $t('reg_test.generate_test_orders') }}
+              </el-button>
+              <el-button @click="resetTestOrders">{{ $t('common.reset') }}</el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-empty v-if="testOrderResult == null" :description="$t('reg_test.empty_result')" :image-size="60" />
+
+          <el-descriptions v-else :column="1" border size="small">
+            <el-descriptions-item :label="$t('reg_test.generated_count')">
+              {{ testOrderResult }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+      </el-col>
     </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 import { fetchApps } from '@/apis/apps'
 import { fetchDevices } from '@/apis/devices'
+import { batchCreateTestOrders, fetchPlans } from '@/apis/payments'
 import { bindRegCode, checkRegDevice, useRegCount } from '@/apis/reg_codes'
 import type { AppModel } from '@/types/apps'
 import type { DeviceInfo } from '@/types/app_devices'
+import type { LicensePlan } from '@/types/payments'
 import type { RegCodeBindCheckResp, UseCountResp } from '@/types/reg_codes'
 import { formatTime } from '@/utils'
 import { fetchAllPages } from '@/utils/pagination'
@@ -171,14 +231,17 @@ import { fetchAllPages } from '@/utils/pagination'
 const { t } = useI18n()
 
 const appOptions = ref<AppModel[]>([])
+const planOptions = ref<LicensePlan[]>([])
 const deviceOptionsMap = ref<Record<number, DeviceInfo[]>>({})
 
 const bindLoading = ref(false)
 const checkLoading = ref(false)
 const useLoading = ref(false)
+const testOrderLoading = ref(false)
 const bindResult = ref<RegCodeBindCheckResp | null>(null)
 const checkResult = ref<RegCodeBindCheckResp | null>(null)
 const useResult = ref<UseCountResp | null>(null)
+const testOrderResult = ref<number | null>(null)
 
 const bindForm = reactive({
   app_id: 0,
@@ -198,6 +261,12 @@ const useForm = reactive({
   use_info_text: '',
 })
 
+const testOrderForm = reactive({
+  plan_id: 0,
+  quantity: 30,
+  month: currentMonth(),
+})
+
 const bindAppKey = computed(() => appOptions.value.find(item => item.id === bindForm.app_id)?.app_valid_key ?? '')
 const checkAppKey = computed(() => appOptions.value.find(item => item.id === checkForm.app_id)?.app_valid_key ?? '')
 const useAppKey = computed(() => appOptions.value.find(item => item.id === useForm.app_id)?.app_valid_key ?? '')
@@ -208,6 +277,22 @@ function getDeviceOptions(appId: number) {
 
 function formatTimestamp(value: number | null | undefined) {
   return value ? formatTime(new Date(value * 1000).toISOString()) : '-'
+}
+
+function planOptionLabel(plan: LicensePlan) {
+  const appName = plan.app_name || `#${plan.app_id}`
+  return `${appName} / ${plan.name}`
+}
+
+function currentMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function disableFutureMonth(date: Date) {
+  const now = new Date()
+  return date.getFullYear() > now.getFullYear()
+    || (date.getFullYear() === now.getFullYear() && date.getMonth() > now.getMonth())
 }
 
 async function ensureDevicesLoaded(appId: number) {
@@ -245,6 +330,13 @@ function resetUseCount() {
   useForm.use_count = 1
   useForm.use_info_text = ''
   useResult.value = null
+}
+
+function resetTestOrders() {
+  testOrderForm.plan_id = planOptions.value[0]?.id ?? 0
+  testOrderForm.quantity = 30
+  testOrderForm.month = currentMonth()
+  testOrderResult.value = null
 }
 
 async function submitBind() {
@@ -320,6 +412,44 @@ async function submitUseCount() {
   }
 }
 
+async function submitTestOrders() {
+  const plan = planOptions.value.find(item => item.id === testOrderForm.plan_id)
+  if (
+    !plan
+    || !/^\d{4}-\d{2}$/.test(testOrderForm.month)
+    || !Number.isInteger(testOrderForm.quantity)
+    || testOrderForm.quantity < 1
+    || testOrderForm.quantity > 1000
+  ) {
+    ElMessage.warning(t('common.please_check_form') as string)
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      t('reg_test.test_orders_confirm', {
+        quantity: testOrderForm.quantity,
+        product: planOptionLabel(plan),
+        month: testOrderForm.month,
+      }) as string,
+      t('common.confirm') as string,
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  testOrderLoading.value = true
+  testOrderResult.value = null
+  try {
+    const result = await batchCreateTestOrders({ ...testOrderForm })
+    testOrderResult.value = result.created_count
+    ElMessage.success(t('reg_test.test_orders_success', { count: result.created_count }) as string)
+  } finally {
+    testOrderLoading.value = false
+  }
+}
+
 async function loadApps() {
   appOptions.value = await fetchAllPages(fetchApps)
 
@@ -334,8 +464,15 @@ async function loadApps() {
   }
 }
 
+async function loadPlans() {
+  planOptions.value = await fetchAllPages(fetchPlans)
+  if ((!testOrderForm.plan_id || testOrderForm.plan_id === 0) && planOptions.value.length) {
+    testOrderForm.plan_id = planOptions.value[0].id
+  }
+}
+
 onMounted(async () => {
-  await loadApps()
+  await Promise.all([loadApps(), loadPlans()])
 })
 
 watch(

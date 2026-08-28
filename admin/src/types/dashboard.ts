@@ -26,7 +26,7 @@ export type DashboardTrendGroupBy = 'day' | 'month' | 'year'
 
 export interface DashboardTrendParams {
   group_by: DashboardTrendGroupBy
-  plan_id?: number
+  app_id?: number
   start_date?: string
   end_date?: string
 }
@@ -37,13 +37,12 @@ export interface DashboardTrendPoint {
   order_count: number
 }
 
-export interface DashboardTrendProduct {
+export interface DashboardTrendApp {
   id: number
   name: string
-  app_name?: string | null
 }
 
 export interface DashboardTrend {
   points: DashboardTrendPoint[]
-  products: DashboardTrendProduct[]
+  apps: DashboardTrendApp[]
 }

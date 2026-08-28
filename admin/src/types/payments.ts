@@ -114,6 +114,16 @@ export interface CreateOrderReq {
   buyer_email?: string
 }
 
+export interface BatchCreateTestOrdersReq {
+  plan_id: number
+  quantity: number
+  month: string
+}
+
+export interface BatchCreateTestOrdersResp {
+  created_count: number
+}
+
 export interface ConfirmOrderRefundReq {
   refund_reference: string
   reason: string

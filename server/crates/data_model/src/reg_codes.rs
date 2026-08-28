@@ -18,7 +18,6 @@ pub struct Model {
     pub code_type: i16,
     pub total_count: Option<i32>,
     pub remaining_count: Option<i32>,
-    pub multi_device_enabled: bool,
     pub device_id: Option<i32>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

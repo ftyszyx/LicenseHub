@@ -335,7 +335,7 @@
     "trend_title": "Revenue and order trends",
     "last_30_days": "Last 30 days, delivered orders only",
     "last_12_months": "Last 12 months, delivered orders only",
-    "all_products": "All products",
+    "all_apps": "All apps",
     "by_day": "Daily",
     "by_month": "Monthly",
     "by_year": "Yearly",
@@ -451,7 +451,7 @@
   },
   "reg_test": {
     "title": "Registration API Test",
-    "subtitle": "Test bind, check and count usage APIs for client integrations.",
+    "subtitle": "Test client integration APIs and generate orders for dashboard verification.",
     "bind_title": "Bind Code",
     "bind_submit": "Bind",
     "bind_success": "Bound successfully",
@@ -465,7 +465,15 @@
     "use_info": "Use info",
     "remain_count": "Remaining",
     "empty_result": "No result",
-    "invalid_use_info": "Use info must be valid JSON"
+    "invalid_use_info": "Use info must be valid JSON",
+    "test_orders_title": "Generate Test Orders",
+    "product": "Product",
+    "order_quantity": "Orders",
+    "order_month": "Month",
+    "generate_test_orders": "Generate",
+    "generated_count": "Generated",
+    "test_orders_confirm": "Generate {quantity} test orders for {product} in {month}? Dates will be randomized within that month and included in dashboard statistics.",
+    "test_orders_success": "Generated {count} test orders"
   },
   "use_records": {
     "title": "Use Records",

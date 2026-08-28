@@ -371,8 +371,7 @@ pub async fn add_impl(state: &AppState, req: CreateRegCodeReq) -> Result<RegCode
         status: Set(i16::from(req.status)),
         code_type: Set(i16::from(code_type)),
         total_count: Set(total_count),
-        remaining_count: Set((max_devices > 1).then_some(total_count).flatten()),
-        multi_device_enabled: Set(max_devices > 1),
+        remaining_count: Set(total_count),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -436,7 +435,6 @@ pub async fn update_impl(
         .unwrap_or_else(|| CodeType::from(reg_code.code_type));
     let final_valid_days = req.valid_days.unwrap_or(reg_code.valid_days);
     let final_total_count = req.total_count.or(reg_code.total_count);
-    let mut final_multi_device_enabled = reg_code.multi_device_enabled;
     if let Some(max_devices) = req.max_devices {
         if max_devices < 1 {
             return Err(AppError::validation(
@@ -463,18 +461,16 @@ pub async fn update_impl(
             ));
         }
 
-        let requested_multi_device_enabled = max_devices > 1;
         let has_binding = !bound_device_ids.is_empty()
             || RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded;
-        if requested_multi_device_enabled != reg_code.multi_device_enabled && has_binding {
+        if (max_devices > 1) != (reg_code.max_devices > 1) && has_binding {
             return Err(AppError::validation(
                 "cannot switch single-device and multi-device mode after reg code is bound",
             ));
         }
-        final_multi_device_enabled = requested_multi_device_enabled;
     }
-    let refresh_shared_remaining =
-        final_multi_device_enabled && RegCodeStatus::from(reg_code.status) != RegCodeStatus::Binded;
+    let refresh_reg_code_remaining = final_code_type == CodeType::Count
+        && RegCodeStatus::from(reg_code.status) != RegCodeStatus::Binded;
     let (code_type, valid_days, total_count, _) = normalize_reg_code_limits_for_app(
         state,
         final_app_id,
@@ -492,7 +488,6 @@ pub async fn update_impl(
     reg_code.valid_days = Set(valid_days);
     if let Some(v) = req.max_devices {
         reg_code.max_devices = Set(v);
-        reg_code.multi_device_enabled = Set(final_multi_device_enabled);
     }
     if let Some(v) = req.status {
         let status = RegCodeStatus::from(v);
@@ -508,9 +503,9 @@ pub async fn update_impl(
     }
     reg_code.code_type = Set(i16::from(code_type));
     reg_code.total_count = Set(total_count);
-    if refresh_shared_remaining {
+    if refresh_reg_code_remaining {
         reg_code.remaining_count = Set(total_count);
-    } else if !final_multi_device_enabled {
+    } else if final_code_type == CodeType::Time {
         reg_code.remaining_count = Set(None);
     }
     reg_code.updated_at = Set(Utc::now().fixed_offset());
@@ -723,12 +718,11 @@ async fn apply_reg_code_revocation(
         }
     }
 
-    let clear_shared_remaining =
-        reg_code.multi_device_enabled && CodeType::from(reg_code.code_type) == CodeType::Count;
+    let clear_reg_code_remaining = CodeType::from(reg_code.code_type) == CodeType::Count;
     let mut active_reg_code = reg_code.into_active_model();
     active_reg_code.status = Set(i16::from(target_status));
     active_reg_code.device_id = Set(None);
-    if clear_shared_remaining {
+    if clear_reg_code_remaining {
         active_reg_code.remaining_count = Set(Some(0));
     }
     active_reg_code.updated_at = Set(now);
@@ -1107,7 +1101,7 @@ where
         .await?)
 }
 
-async fn shared_count_reg_codes_for_device<C>(
+async fn code_balanced_count_reg_codes_for_device<C>(
     db: &C,
     device_id: i32,
 ) -> Result<Vec<reg_codes::Model>, AppError>
@@ -1127,7 +1121,6 @@ where
 
     Ok(reg_codes::Entity::find()
         .filter(reg_codes::Column::Id.is_in(reg_code_ids))
-        .filter(reg_codes::Column::MultiDeviceEnabled.eq(true))
         .filter(reg_codes::Column::Status.eq(i16::from(RegCodeStatus::Binded)))
         .filter(reg_codes::Column::CodeType.eq(i16::from(CodeType::Count)))
         .order_by_asc(reg_codes::Column::Id)
@@ -1139,15 +1132,15 @@ async fn effective_device_remaining<C>(db: &C, device: &app_devices::Model) -> R
 where
     C: ConnectionTrait,
 {
-    let shared_remaining: i32 = shared_count_reg_codes_for_device(db, device.id)
+    let reg_code_remaining: i32 = code_balanced_count_reg_codes_for_device(db, device.id)
         .await?
         .into_iter()
         .map(|reg_code| reg_code.remaining_count.unwrap_or(0).max(0))
         .sum();
-    Ok(device.remaining.unwrap_or(0).max(0) + shared_remaining)
+    Ok(device.remaining.unwrap_or(0).max(0) + reg_code_remaining)
 }
 
-async fn bind_multi_device_entitlement(
+async fn bind_code_level_entitlement(
     state: &AppState,
     app_model: &apps::Model,
     device_id: &str,
@@ -1308,6 +1301,13 @@ async fn bind_multi_device_entitlement(
     }
     active_reg_code.updated_at = Set(now);
     active_reg_code.update(&tx).await?;
+
+    let entitlement = match entitlement {
+        BoundEntitlement::Time(expire_time) => BoundEntitlement::Time(expire_time),
+        BoundEntitlement::Count(_) => {
+            BoundEntitlement::Count(effective_device_remaining(&tx, &device).await?)
+        }
+    };
     tx.commit().await?;
     Ok(entitlement)
 }
@@ -1338,8 +1338,10 @@ pub async fn bind_code_impl(
     }
     let private_key_b64 = require_license_signing_private_key_b64(state).await?;
 
-    if reg_code_model.multi_device_enabled {
-        return match bind_multi_device_entitlement(
+    let uses_code_level_entitlement = reg_code_model.max_devices > 1
+        || CodeType::from(reg_code_model.code_type) == CodeType::Count;
+    if uses_code_level_entitlement {
+        return match bind_code_level_entitlement(
             state,
             &app_model,
             &req.device_id,
@@ -1365,30 +1367,15 @@ pub async fn bind_code_impl(
         };
     }
 
-    match CodeType::from(app_model.code_type) {
-        CodeType::Time => {
-            bind_time_reg_code(
-                state,
-                &private_key_b64,
-                &app_model,
-                &req.device_id,
-                device_model,
-                &reg_code_model,
-            )
-            .await
-        }
-        CodeType::Count => {
-            bind_count_reg_code(
-                state,
-                &private_key_b64,
-                &app_model,
-                &req.device_id,
-                device_model,
-                &reg_code_model,
-            )
-            .await
-        }
-    }
+    bind_time_reg_code(
+        state,
+        &private_key_b64,
+        &app_model,
+        &req.device_id,
+        device_model,
+        &reg_code_model,
+    )
+    .await
 }
 
 pub async fn check_device_impl(
@@ -1475,7 +1462,7 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
 
     let tx = state.db.begin().await?;
     let initial_device = find_device_by_app_and_id_on(&tx, app_model.id, &req.device_id).await?;
-    let shared_ids = match initial_device.as_ref() {
+    let code_balance_ids = match initial_device.as_ref() {
         Some(device) => {
             reg_code_devices::Entity::find()
                 .filter(reg_code_devices::Column::DeviceId.eq(device.id))
@@ -1487,12 +1474,11 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
         }
         None => Vec::new(),
     };
-    let mut shared_codes = if shared_ids.is_empty() {
+    let mut code_balances = if code_balance_ids.is_empty() {
         Vec::new()
     } else {
         reg_codes::Entity::find()
-            .filter(reg_codes::Column::Id.is_in(shared_ids))
-            .filter(reg_codes::Column::MultiDeviceEnabled.eq(true))
+            .filter(reg_codes::Column::Id.is_in(code_balance_ids))
             .filter(reg_codes::Column::Status.eq(i16::from(RegCodeStatus::Binded)))
             .filter(reg_codes::Column::CodeType.eq(i16::from(CodeType::Count)))
             .order_by_asc(reg_codes::Column::Id)
@@ -1510,7 +1496,7 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
         .one(&tx)
         .await?;
 
-    let shared_before: i32 = shared_codes
+    let reg_code_before: i32 = code_balances
         .iter()
         .map(|reg_code| reg_code.remaining_count.unwrap_or(0).max(0))
         .sum();
@@ -1519,9 +1505,9 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
         .and_then(|device| device.remaining)
         .unwrap_or(0)
         .max(0);
-    let remain_before = shared_before + device_before;
+    let remain_before = reg_code_before + device_before;
 
-    if device_model.is_none() && shared_codes.is_empty() {
+    if device_model.is_none() && code_balances.is_empty() {
         if app_model.trial_num <= 0 {
             return Err(AppError::Message("app has no trial".into()));
         }
@@ -1564,7 +1550,7 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
 
     let now = Utc::now().fixed_offset();
     let mut required = req.use_count;
-    for reg_code in shared_codes.drain(..) {
+    for reg_code in code_balances.drain(..) {
         if required == 0 {
             break;
         }
@@ -1670,69 +1656,6 @@ pub async fn bind_time_reg_code(
     time_status_resp(state, private_key_b64, app_model, device_id, expire_time)
 }
 
-pub async fn bind_count_reg_code(
-    state: &AppState,
-    private_key_b64: &str,
-    app_model: &apps::Model,
-    device_id: &str,
-    device_model: Option<app_devices::Model>,
-    reg_code_model: &reg_codes::Model,
-) -> Result<RegCodeStatusResp, AppError> {
-    if CodeType::from(reg_code_model.code_type) != CodeType::Count {
-        return Err(AppError::Message("code type is not count".into()));
-    }
-
-    if reg_code_model.device_id.is_some() {
-        ensure_reg_code_bound_to_current_device(device_model.as_ref(), reg_code_model)?;
-        let device_model =
-            device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
-        let remain_count = device_model.remaining.unwrap_or(0);
-        if remain_count <= 0 {
-            return Err(AppError::Message("device remaining count is 0".into()));
-        }
-        return count_status_resp(state, private_key_b64, app_model, device_id, remain_count);
-    }
-
-    let total_count = reg_code_model.total_count.unwrap_or(0);
-    if total_count <= 0 {
-        return Err(AppError::Message("reg code remaining count is 0".into()));
-    }
-
-    let now = Utc::now().fixed_offset();
-    let tx = state.db.begin().await?;
-    let mut active_reg_model = reg_code_model.clone().into_active_model();
-    active_reg_model.binding_time = Set(Some(now));
-    active_reg_model.status = Set(RegCodeStatus::Binded.into());
-
-    let remain_count = match device_model {
-        Some(device_model) => {
-            let current_remaining = device_model.remaining.unwrap_or(0);
-            let new_remaining = current_remaining + total_count;
-
-            active_reg_model.device_id = Set(Some(device_model.id));
-            let mut active_device_model = device_model.into_active_model();
-            active_device_model.remaining = Set(Some(new_remaining));
-            active_device_model.update(&tx).await?;
-            new_remaining
-        }
-        None => {
-            let device_active = app_devices::ActiveModel {
-                app_id: Set(app_model.id),
-                device_id: Set(device_id.to_string()),
-                remaining: Set(Some(total_count)),
-                ..Default::default()
-            };
-            let inserted_device = device_active.insert(&tx).await?;
-            active_reg_model.device_id = Set(Some(inserted_device.id));
-            total_count
-        }
-    };
-
-    active_reg_model.update(&tx).await?;
-    tx.commit().await?;
-    count_status_resp(state, private_key_b64, app_model, device_id, remain_count)
-}
-
 pub async fn validate_code_impl(
     state: &AppState,
     req: RegCodeValidateReq,
@@ -1788,13 +1711,15 @@ pub async fn validate_code_impl(
             },
         ));
     }
-    if reg_code_model.multi_device_enabled {
+    let uses_code_level_entitlement = reg_code_model.max_devices > 1
+        || CodeType::from(reg_code_model.code_type) == CodeType::Count;
+    if uses_code_level_entitlement {
         let consume_count = if CodeType::from(app_model.code_type) == CodeType::Count {
             1
         } else {
             0
         };
-        return match bind_multi_device_entitlement(
+        return match bind_code_level_entitlement(
             state,
             &app_model,
             &device_id,
@@ -1815,14 +1740,7 @@ pub async fn validate_code_impl(
             }),
         };
     }
-    match app_model.code_type.into() {
-        CodeType::Time => {
-            time_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await
-        }
-        CodeType::Count => {
-            count_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await
-        }
-    }
+    time_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await
 }
 //试用
 pub async fn trial_validate(
@@ -1967,77 +1885,4 @@ pub async fn time_reg_code_validate(
         expire_time: Some(current_device_expire),
         remaining_count: None,
     })
-}
-
-//次数类型注册码验证
-pub async fn count_reg_code_validate(
-    state: &AppState,
-    app_model: &apps::Model,
-    device_id: &str,
-    device_model: Option<app_devices::Model>,
-    reg_code_model: &reg_codes::Model,
-) -> Result<RegCodeValidateResp, AppError> {
-    let now = Utc::now().fixed_offset();
-    if CodeType::from(reg_code_model.code_type) != CodeType::Count {
-        return Err(AppError::Message("code type is not count".into()));
-    }
-    if reg_code_model.device_id.is_some() {
-        let device_model =
-            device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
-        let remaining = device_model.remaining.unwrap_or(0);
-        if remaining <= 0 {
-            return Err(AppError::Message("device remaining count is 0".into()));
-        }
-        return Ok(RegCodeValidateResp {
-            code_type: CodeType::Count,
-            expire_time: None,
-            remaining_count: Some(remaining),
-        });
-    }
-
-    let ctx = state.db.begin().await?;
-    let mut reg_code_active = reg_code_model.clone().into_active_model();
-    reg_code_active.binding_time = Set(Some(now));
-    reg_code_active.status = Set(RegCodeStatus::Binded.into());
-    let remain_count_after = match device_model {
-        Some(device_model) => {
-            // update device
-            let remain_count_before = device_model.remaining.unwrap_or(0);
-            if remain_count_before <= 0 {
-                return Err(AppError::Message("device remaining count is 0".into()));
-            }
-            let remain_count_after = remain_count_before - 1;
-
-            reg_code_active.device_id = Set(Some(device_model.id));
-            let mut active_device_model = device_model.into_active_model();
-            active_device_model.remaining = Set(Some(remain_count_after));
-            active_device_model.update(&ctx).await?;
-            remain_count_after
-        }
-        None => {
-            // add device
-            let remain_count_before = reg_code_model.total_count.unwrap_or(0);
-            if remain_count_before <= 0 {
-                return Err(AppError::Message("reg code remaining count is 0".into()));
-            }
-            let remain_count_after = remain_count_before - 1;
-
-            let device_active = app_devices::ActiveModel {
-                app_id: Set(app_model.id),
-                device_id: Set(device_id.to_string()),
-                remaining: Set(Some(remain_count_after)),
-                ..Default::default()
-            };
-            let inserted_device = device_active.insert(&ctx).await?;
-            reg_code_active.device_id = Set(Some(inserted_device.id));
-            remain_count_after
-        }
-    };
-    reg_code_active.update(&ctx).await?;
-    ctx.commit().await?;
-    return Ok(RegCodeValidateResp {
-        code_type: CodeType::Count,
-        expire_time: None,
-        remaining_count: Some(remain_count_after),
-    });
 }

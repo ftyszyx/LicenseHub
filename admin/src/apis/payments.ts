@@ -1,6 +1,8 @@
 import request from '@/utils/request'
 import type { ApiResponse, PagingResponse } from '@/types'
 import type {
+  BatchCreateTestOrdersReq,
+  BatchCreateTestOrdersResp,
   ConfirmOrderRefundReq,
   CreateOrderReq,
   LicensePlan,
@@ -67,6 +69,11 @@ export const deletePlan = async (id: number) => {
 
 export const fetchOrders = async (params: ListOrdersParams = {}) => {
   const response = await request.get('/admin/orders/list', { params }) as ApiResponse<PagingResponse<OrderModel>>
+  return response.data
+}
+
+export const batchCreateTestOrders = async (payload: BatchCreateTestOrdersReq) => {
+  const response = await request.post('/admin/orders/test-batch', payload) as ApiResponse<BatchCreateTestOrdersResp>
   return response.data
 }
 

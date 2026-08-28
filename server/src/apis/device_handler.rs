@@ -40,7 +40,7 @@ impl TryFrom<(app_devices::Model, Option<apps::Model>)> for DeviceInfo {
     }
 }
 
-async fn enrich_shared_remaining_batch(
+async fn enrich_reg_code_remaining_batch(
     state: &AppState,
     infos: &mut [DeviceInfo],
 ) -> Result<(), AppError> {
@@ -61,30 +61,29 @@ async fn enrich_shared_remaining_batch(
         .iter()
         .map(|binding| binding.reg_code_id)
         .collect::<HashSet<_>>();
-    let shared_codes = reg_codes::Entity::find()
+    let code_balances = reg_codes::Entity::find()
         .filter(reg_codes::Column::Id.is_in(reg_code_ids))
-        .filter(reg_codes::Column::MultiDeviceEnabled.eq(true))
         .filter(reg_codes::Column::Status.eq(2))
         .filter(reg_codes::Column::CodeType.eq(1))
         .all(&state.db)
         .await?;
 
-    let remaining_by_reg_code = shared_codes
+    let remaining_by_reg_code = code_balances
         .into_iter()
         .map(|reg_code| (reg_code.id, reg_code.remaining_count.unwrap_or(0).max(0)))
         .collect::<HashMap<_, _>>();
-    let mut shared_remaining_by_device = HashMap::<i32, i32>::new();
+    let mut reg_code_remaining_by_device = HashMap::<i32, i32>::new();
     for binding in bindings {
         if let Some(remaining) = remaining_by_reg_code.get(&binding.reg_code_id) {
-            *shared_remaining_by_device
+            *reg_code_remaining_by_device
                 .entry(binding.device_id)
                 .or_default() += remaining;
         }
     }
 
     for info in infos {
-        if let Some(shared_remaining) = shared_remaining_by_device.get(&info.id) {
-            info.remaining = Some(info.remaining.unwrap_or(0).max(0) + shared_remaining);
+        if let Some(reg_code_remaining) = reg_code_remaining_by_device.get(&info.id) {
+            info.remaining = Some(info.remaining.unwrap_or(0).max(0) + reg_code_remaining);
         }
     }
     Ok(())
@@ -129,6 +128,6 @@ pub async fn get_list_impl(
         .into_iter()
         .map(DeviceInfo::try_from)
         .collect::<Result<Vec<_>, _>>()?;
-    enrich_shared_remaining_batch(state, &mut list).await?;
+    enrich_reg_code_remaining_batch(state, &mut list).await?;
     Ok(PagingResponse { list, total, page })
 }

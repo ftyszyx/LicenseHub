@@ -44,7 +44,7 @@ pub struct DashboardStats {
 pub struct DashboardTrendParams {
     pub group_by: Option<String>,
     #[serde(deserialize_with = "from_str_optional", default)]
-    pub plan_id: Option<i32>,
+    pub app_id: Option<i32>,
     pub start_date: Option<String>,
     pub end_date: Option<String>,
 }
@@ -59,14 +59,13 @@ pub struct DashboardTrendPoint {
 #[derive(Debug, Serialize)]
 pub struct DashboardTrend {
     pub points: Vec<DashboardTrendPoint>,
-    pub products: Vec<DashboardTrendProduct>,
+    pub apps: Vec<DashboardTrendApp>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct DashboardTrendProduct {
+pub struct DashboardTrendApp {
     pub id: i32,
     pub name: String,
-    pub app_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -169,8 +168,8 @@ pub async fn get_dashboard_trend_impl(
     state: &AppState,
     params: DashboardTrendParams,
 ) -> Result<DashboardTrend, AppError> {
-    if matches!(params.plan_id, Some(plan_id) if plan_id < 1) {
-        return Err(AppError::validation("plan_id must be greater than 0"));
+    if matches!(params.app_id, Some(app_id) if app_id < 1) {
+        return Err(AppError::validation("app_id must be greater than 0"));
     }
 
     let group_by = TrendGroupBy::parse(params.group_by.as_deref())?;
@@ -200,7 +199,7 @@ pub async fn get_dashboard_trend_impl(
             FROM "orders"
             WHERE "status" = $1
               AND TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at"))::DATE BETWEEN $2::DATE AND $3::DATE
-              AND ($4::INTEGER IS NULL OR "plan_id" = $4)
+              AND ($4::INTEGER IS NULL OR "app_id" = $4)
             GROUP BY period
             ORDER BY period
             "#
@@ -214,7 +213,7 @@ pub async fn get_dashboard_trend_impl(
             FROM "orders"
             WHERE "status" = $1
               AND DATE_TRUNC('month', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")))::DATE BETWEEN $2::DATE AND $3::DATE
-              AND ($4::INTEGER IS NULL OR "plan_id" = $4)
+              AND ($4::INTEGER IS NULL OR "app_id" = $4)
             GROUP BY period
             ORDER BY period
             "#
@@ -228,7 +227,7 @@ pub async fn get_dashboard_trend_impl(
             FROM "orders"
             WHERE "status" = $1
               AND DATE_TRUNC('year', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")))::DATE BETWEEN $2::DATE AND $3::DATE
-              AND ($4::INTEGER IS NULL OR "plan_id" = $4)
+              AND ($4::INTEGER IS NULL OR "app_id" = $4)
             GROUP BY period
             ORDER BY period
             "#
@@ -244,7 +243,7 @@ pub async fn get_dashboard_trend_impl(
                 i16::from(OrderStatus::Delivered).into(),
                 query_start.into(),
                 query_end.into(),
-                params.plan_id.into(),
+                params.app_id.into(),
             ],
         ))
         .await?;
@@ -261,17 +260,15 @@ pub async fn get_dashboard_trend_impl(
         })
         .collect::<Result<std::collections::HashMap<_, _>, sea_orm::DbErr>>()?;
 
-    let products = license_plans::Entity::find()
-        .find_also_related(apps::Entity)
-        .order_by_asc(license_plans::Column::SortOrder)
-        .order_by_asc(license_plans::Column::Id)
+    let apps = apps::Entity::find()
+        .order_by_asc(apps::Column::SortOrder)
+        .order_by_asc(apps::Column::Id)
         .all(&state.db)
         .await?
         .into_iter()
-        .map(|(plan, app)| DashboardTrendProduct {
-            id: plan.id,
-            name: plan.name,
-            app_name: app.map(|app| app.name),
+        .map(|app| DashboardTrendApp {
+            id: app.id,
+            name: app.name,
         })
         .collect();
 
@@ -287,7 +284,7 @@ pub async fn get_dashboard_trend_impl(
                 }
             })
             .collect(),
-        products,
+        apps,
     })
 }
 

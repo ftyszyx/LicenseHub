@@ -9,7 +9,7 @@ use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::resource_service::{ResourceUpload, download_resource, upload_resource};
 use crate::core::response::ApiResponse;
-use chrono::Utc;
+use chrono::{Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 use data_model::{
     apps, distribution_commissions, license_plans, order_events, order_refund_attachments,
     order_refunds, orders, payment_channels, reg_codes, resources, users,
@@ -43,6 +43,8 @@ const ORDER_EVENTS_NOTIFY_CHANNEL: &str = "licensehub_order_events";
 const APP_STATUS_ENABLED: i16 = 1;
 const REFUND_STATUS_SUCCEEDED: i16 = 1;
 const MAX_REFUND_ATTACHMENT_SIZE: u64 = 5 * 1024 * 1024;
+const MAX_TEST_ORDER_QUANTITY: u32 = 1000;
+const CHINA_UTC_OFFSET_SECONDS: i32 = 8 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i16)]
@@ -310,6 +312,18 @@ pub struct CreateOrderReq {
     pub pay_type: String,
     pub referral_code: Option<String>,
     pub buyer_email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BatchCreateTestOrdersReq {
+    pub plan_id: i32,
+    pub quantity: u32,
+    pub month: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchCreateTestOrdersResp {
+    pub created_count: u32,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -915,6 +929,129 @@ pub async fn create_order(
     let client_ip = req.remote_addr().to_string();
     let order = create_order_impl(state, body, Some(client_ip), buyer_user_id).await?;
     Ok(ApiResponse::success(order))
+}
+
+#[handler]
+pub async fn batch_create_test_orders(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<BatchCreateTestOrdersResp>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let body = req.parse_json::<BatchCreateTestOrdersReq>().await?;
+    validate_test_order_request(&body)?;
+
+    let plan = license_plans::Entity::find_by_id(body.plan_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("license_plans", Some(body.plan_id)))?;
+
+    let china_offset = FixedOffset::east_opt(CHINA_UTC_OFFSET_SECONDS).unwrap();
+    let now = Utc::now().with_timezone(&china_offset);
+    let (month_start, month_end) = test_order_month_range(&body.month, now)?;
+    let test_orders = build_test_orders(&plan, body.quantity, month_start, month_end, &body.month);
+    let transaction = state.db.begin().await?;
+    orders::Entity::insert_many(test_orders)
+        .exec(&transaction)
+        .await?;
+    transaction.commit().await?;
+
+    Ok(ApiResponse::success(BatchCreateTestOrdersResp {
+        created_count: body.quantity,
+    }))
+}
+
+fn validate_test_order_request(req: &BatchCreateTestOrdersReq) -> Result<(), AppError> {
+    if req.plan_id <= 0 {
+        return Err(AppError::validation("plan_id must be greater than 0"));
+    }
+    if !(1..=MAX_TEST_ORDER_QUANTITY).contains(&req.quantity) {
+        return Err(AppError::validation(format!(
+            "quantity must be between 1 and {MAX_TEST_ORDER_QUANTITY}"
+        )));
+    }
+    if parse_test_order_month(&req.month).is_none() {
+        return Err(AppError::validation("month must use YYYY-MM format"));
+    }
+    Ok(())
+}
+
+fn parse_test_order_month(month: &str) -> Option<(i32, u32)> {
+    if month.len() != 7 {
+        return None;
+    }
+    let (year, month_number) = month.split_once('-')?;
+    if year.len() != 4 || month_number.len() != 2 {
+        return None;
+    }
+    let year = year.parse::<i32>().ok()?;
+    let month_number = month_number.parse::<u32>().ok()?;
+    NaiveDate::from_ymd_opt(year, month_number, 1)?;
+    Some((year, month_number))
+}
+
+fn test_order_month_range(
+    month: &str,
+    now: chrono::DateTime<FixedOffset>,
+) -> Result<(chrono::DateTime<FixedOffset>, chrono::DateTime<FixedOffset>), AppError> {
+    let (year, month_number) = parse_test_order_month(month)
+        .ok_or_else(|| AppError::validation("month must use YYYY-MM format"))?;
+    let start_date = NaiveDate::from_ymd_opt(year, month_number, 1).unwrap();
+    let (next_year, next_month) = if month_number == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month_number + 1)
+    };
+    let next_date = NaiveDate::from_ymd_opt(next_year, next_month, 1)
+        .ok_or_else(|| AppError::validation("month is outside the supported date range"))?;
+    let offset = *now.offset();
+    let month_start = offset
+        .from_local_datetime(&start_date.and_hms_opt(0, 0, 0).unwrap())
+        .single()
+        .unwrap();
+    if month_start > now {
+        return Err(AppError::validation("month cannot be in the future"));
+    }
+    let natural_end = offset
+        .from_local_datetime(&next_date.and_hms_opt(0, 0, 0).unwrap())
+        .single()
+        .unwrap();
+    let month_end = natural_end.min(now + Duration::seconds(1));
+    Ok((month_start, month_end))
+}
+
+fn build_test_orders(
+    plan: &license_plans::Model,
+    quantity: u32,
+    month_start: chrono::DateTime<chrono::FixedOffset>,
+    month_end: chrono::DateTime<chrono::FixedOffset>,
+    month: &str,
+) -> Vec<orders::ActiveModel> {
+    let seconds_in_range = (month_end - month_start).num_seconds().max(1) as u128;
+    (0..quantity)
+        .map(|_| {
+            let random_offset = (Uuid::new_v4().as_u128() % seconds_in_range) as i64;
+            let occurred_at = month_start + Duration::seconds(random_offset);
+            let order_no = new_test_order_no();
+            orders::ActiveModel {
+                order_no: Set(order_no.clone()),
+                plan_id: Set(plan.id),
+                app_id: Set(plan.app_id),
+                amount_cents: Set(plan.price_cents),
+                pay_type: Set("test".to_string()),
+                status: Set(i16::from(OrderStatus::Delivered)),
+                provider: Set("test".to_string()),
+                provider_trade_no: Set(Some(order_no)),
+                provider_payload: Set(Some(json!({
+                    "test_order": true,
+                    "test_month": month,
+                }))),
+                paid_at: Set(Some(occurred_at)),
+                created_at: Set(occurred_at),
+                updated_at: Set(occurred_at),
+                ..Default::default()
+            }
+        })
+        .collect()
 }
 
 pub async fn create_order_impl(
@@ -1916,8 +2053,7 @@ async fn create_paid_reg_code(
         status: Set(i16::from(RegCodeStatus::Issued)),
         code_type: Set(plan.code_type),
         total_count: Set(plan.total_count),
-        remaining_count: Set((app.max_devices > 1).then_some(plan.total_count).flatten()),
-        multi_device_enabled: Set(app.max_devices > 1),
+        remaining_count: Set(plan.total_count),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -2208,6 +2344,14 @@ fn new_order_no() -> String {
     format!("LH{}{}", Utc::now().format("%Y%m%d%H%M%S"), short_id(10))
 }
 
+fn new_test_order_no() -> String {
+    format!(
+        "TEST-{}-{}",
+        Utc::now().format("%Y%m%d%H%M%S"),
+        short_id(12)
+    )
+}
+
 fn new_reg_code() -> String {
     format!("LH-{}", short_id(20))
 }
@@ -2220,4 +2364,135 @@ fn short_id(len: usize) -> String {
         .take(len)
         .map(|c| c.to_ascii_uppercase())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Datelike, TimeZone};
+
+    fn test_plan(now: chrono::DateTime<chrono::FixedOffset>) -> license_plans::Model {
+        license_plans::Model {
+            id: 42,
+            app_id: 7,
+            name: "Test plan".to_string(),
+            description: None,
+            price_cents: 1999,
+            code_type: 0,
+            valid_days: 30,
+            total_count: None,
+            status: i16::from(PlanStatus::Enabled),
+            sort_order: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn test_order_request_enforces_plan_and_quantity_bounds() {
+        assert!(
+            validate_test_order_request(&BatchCreateTestOrdersReq {
+                plan_id: 1,
+                quantity: 1,
+                month: "2026-08".to_string(),
+            })
+            .is_ok()
+        );
+        assert!(
+            validate_test_order_request(&BatchCreateTestOrdersReq {
+                plan_id: 1,
+                quantity: MAX_TEST_ORDER_QUANTITY,
+                month: "2026-08".to_string(),
+            })
+            .is_ok()
+        );
+        assert!(
+            validate_test_order_request(&BatchCreateTestOrdersReq {
+                plan_id: 0,
+                quantity: 1,
+                month: "2026-08".to_string(),
+            })
+            .is_err()
+        );
+        assert!(
+            validate_test_order_request(&BatchCreateTestOrdersReq {
+                plan_id: 1,
+                quantity: 0,
+                month: "2026-08".to_string(),
+            })
+            .is_err()
+        );
+        assert!(
+            validate_test_order_request(&BatchCreateTestOrdersReq {
+                plan_id: 1,
+                quantity: MAX_TEST_ORDER_QUANTITY + 1,
+                month: "2026-08".to_string(),
+            })
+            .is_err()
+        );
+        assert!(
+            validate_test_order_request(&BatchCreateTestOrdersReq {
+                plan_id: 1,
+                quantity: 1,
+                month: "2026-13".to_string(),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_order_month_range_rejects_future_month_and_caps_current_month_at_now() {
+        let offset = FixedOffset::east_opt(CHINA_UTC_OFFSET_SECONDS).unwrap();
+        let now = offset.with_ymd_and_hms(2026, 8, 28, 12, 0, 0).unwrap();
+
+        let (past_start, past_end) = test_order_month_range("2024-02", now).unwrap();
+        assert_eq!(past_start.day(), 1);
+        assert_eq!(past_end.day(), 1);
+        assert_eq!(past_end.month(), 3);
+
+        let (current_start, current_end) = test_order_month_range("2026-08", now).unwrap();
+        assert_eq!(current_start.day(), 1);
+        assert_eq!(current_end, now + Duration::seconds(1));
+        assert!(test_order_month_range("2026-09", now).is_err());
+    }
+
+    #[test]
+    fn test_orders_are_delivered_marked_and_inside_selected_month() {
+        let offset = FixedOffset::east_opt(CHINA_UTC_OFFSET_SECONDS).unwrap();
+        let now = offset.with_ymd_and_hms(2026, 8, 28, 12, 0, 0).unwrap();
+        let plan = test_plan(now);
+        let (month_start, month_end) = test_order_month_range("2026-07", now).unwrap();
+        let generated = build_test_orders(&plan, 100, month_start, month_end, "2026-07");
+
+        assert_eq!(generated.len(), 100);
+        let first = &generated[0];
+        assert!(first.order_no.clone().unwrap().starts_with("TEST-"));
+        assert_eq!(first.plan_id.clone().unwrap(), plan.id);
+        assert_eq!(first.app_id.clone().unwrap(), plan.app_id);
+        assert_eq!(first.amount_cents.clone().unwrap(), plan.price_cents);
+        assert_eq!(first.pay_type.clone().unwrap(), "test");
+        assert_eq!(first.provider.clone().unwrap(), "test");
+        assert_eq!(
+            first.status.clone().unwrap(),
+            i16::from(OrderStatus::Delivered)
+        );
+        assert_eq!(first.reg_code_id.clone(), sea_orm::ActiveValue::NotSet);
+        assert_eq!(first.referrer_user_id.clone(), sea_orm::ActiveValue::NotSet);
+        assert_eq!(
+            first.commission_amount_cents.clone(),
+            sea_orm::ActiveValue::NotSet
+        );
+        assert_eq!(
+            first.provider_payload.clone().unwrap(),
+            Some(json!({
+                "test_order": true,
+                "test_month": "2026-07",
+            }))
+        );
+        for order in generated {
+            let paid_at = order.paid_at.unwrap().unwrap();
+            assert!(paid_at >= month_start);
+            assert!(paid_at < month_end);
+        }
+    }
 }

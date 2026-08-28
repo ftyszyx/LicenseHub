@@ -96,7 +96,7 @@
     "trend_title": "收入与订单趋势",
     "last_30_days": "最近 30 天，仅统计已完成订单",
     "last_12_months": "最近 12 个月，仅统计已完成订单",
-    "all_products": "全部产品",
+    "all_apps": "全部应用",
     "by_day": "按日",
     "by_month": "按月",
     "by_year": "按年",
@@ -458,7 +458,7 @@
   },
   "reg_test": {
     "title": "注册码接口测试",
-    "subtitle": "用于测试客户端接入的绑定、检查和扣次接口。",
+    "subtitle": "用于测试客户端接入接口，以及生成仪表盘测试订单。",
     "bind_title": "绑定注册码",
     "bind_submit": "绑定",
     "bind_success": "绑定成功",
@@ -472,7 +472,15 @@
     "use_info": "使用信息",
     "remain_count": "剩余次数",
     "empty_result": "暂无结果",
-    "invalid_use_info": "使用信息必须是合法 JSON"
+    "invalid_use_info": "使用信息必须是合法 JSON",
+    "test_orders_title": "批量生成测试订单",
+    "product": "商品",
+    "order_quantity": "订单数量",
+    "order_month": "月份",
+    "generate_test_orders": "生成订单",
+    "generated_count": "已生成",
+    "test_orders_confirm": "确定为“{product}”生成 {quantity} 个 {month} 的测试订单吗？订单日期将在该月内随机生成并计入仪表盘统计。",
+    "test_orders_success": "已生成 {count} 个测试订单"
   },
   "use_records": {
     "title": "使用记录",

@@ -205,6 +205,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .get(apis::payment_handler::list_orders),
         )
         .push(
+            Router::with_path("orders/test-batch")
+                .hoop(RequirePerm::new("orders", "UPDATE"))
+                .post(apis::payment_handler::batch_create_test_orders),
+        )
+        .push(
             Router::with_path("orders/{id}/refund")
                 .hoop(RequirePerm::new("orders", "UPDATE"))
                 .post(apis::payment_handler::confirm_order_refund),

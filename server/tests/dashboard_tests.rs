@@ -56,7 +56,28 @@ async fn test_dashboard_stats_use_real_data() {
     let json = helpers::print_response_body_get_json(resp, "dashboard_create_plan").await;
     let plan_id = json["data"]["id"].as_i64().unwrap() as i32;
 
+    let second_plan_body = json!({
+        "app_id": app_id,
+        "name": "Dashboard plan 2",
+        "description": "second dashboard test plan",
+        "price_cents": 2599,
+        "code_type": 0,
+        "valid_days": 60,
+        "total_count": null,
+        "status": 1,
+        "sort_order": 1
+    });
+    let resp = TestClient::post(helpers::get_url("/api/admin/plans"))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&second_plan_body)
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "dashboard_create_second_plan").await;
+    let second_plan_id = json["data"]["id"].as_i64().unwrap() as i32;
+
     let first_order_no = create_order(&ctx, plan_id).await;
+    let second_order_no = create_order(&ctx, second_plan_id).await;
     let _pending_order_no = create_order(&ctx, plan_id).await;
 
     process_payment_notification(
@@ -73,19 +94,33 @@ async fn test_dashboard_stats_use_real_data() {
     )
     .await
     .unwrap();
+    process_payment_notification(
+        &ctx.app_state,
+        PaymentNotification {
+            provider: "wechat".to_string(),
+            pay_type: "wechat_native".to_string(),
+            out_trade_no: second_order_no,
+            provider_trade_no: Some(helpers::unique_name("WX")),
+            amount_cents: 2599,
+            status: PaymentStatus::Success,
+            raw_payload: json!({"source": "dashboard-test-second-plan"}),
+        },
+    )
+    .await
+    .unwrap();
 
     let after = fetch_dashboard(&ctx).await;
     assert_eq!(
         after["total_orders"].as_u64().unwrap() - before["total_orders"].as_u64().unwrap(),
-        2
+        3
     );
     assert_eq!(
         after["new_orders_today"].as_u64().unwrap() - before["new_orders_today"].as_u64().unwrap(),
-        2
+        3
     );
     assert_eq!(
         after["delivered_orders"].as_u64().unwrap() - before["delivered_orders"].as_u64().unwrap(),
-        1
+        2
     );
     assert_eq!(
         after["pending_orders"].as_u64().unwrap() - before["pending_orders"].as_u64().unwrap(),
@@ -94,11 +129,11 @@ async fn test_dashboard_stats_use_real_data() {
     assert_eq!(
         after["total_revenue_cents"].as_i64().unwrap()
             - before["total_revenue_cents"].as_i64().unwrap(),
-        2599
+        5198
     );
     assert_eq!(
         after["active_products"].as_u64().unwrap() - before["active_products"].as_u64().unwrap(),
-        1
+        2
     );
     assert!(
         after["recent_orders"]
@@ -111,26 +146,33 @@ async fn test_dashboard_stats_use_real_data() {
             })
     );
 
-    let daily_trend = fetch_dashboard_trend(&ctx, "day", Some(plan_id)).await;
+    let daily_trend = fetch_dashboard_trend(&ctx, "day", Some(app_id)).await;
+    assert!(
+        daily_trend["apps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|app| app["id"].as_i64() == Some(app_id as i64))
+    );
     let daily_points = daily_trend["points"].as_array().unwrap();
     assert_eq!(daily_points.len(), 30);
     let today = daily_points.last().unwrap();
-    assert_eq!(today["revenue_cents"].as_i64(), Some(2599));
-    assert_eq!(today["order_count"].as_u64(), Some(1));
+    assert_eq!(today["revenue_cents"].as_i64(), Some(5198));
+    assert_eq!(today["order_count"].as_u64(), Some(2));
 
-    let monthly_trend = fetch_dashboard_trend(&ctx, "month", Some(plan_id)).await;
+    let monthly_trend = fetch_dashboard_trend(&ctx, "month", Some(app_id)).await;
     let monthly_points = monthly_trend["points"].as_array().unwrap();
     assert_eq!(monthly_points.len(), 12);
     let current_month = monthly_points.last().unwrap();
-    assert_eq!(current_month["revenue_cents"].as_i64(), Some(2599));
-    assert_eq!(current_month["order_count"].as_u64(), Some(1));
+    assert_eq!(current_month["revenue_cents"].as_i64(), Some(5198));
+    assert_eq!(current_month["order_count"].as_u64(), Some(2));
 
-    let yearly_trend = fetch_dashboard_trend(&ctx, "year", Some(plan_id)).await;
+    let yearly_trend = fetch_dashboard_trend(&ctx, "year", Some(app_id)).await;
     let yearly_points = yearly_trend["points"].as_array().unwrap();
     assert_eq!(yearly_points.len(), 5);
     let current_year = yearly_points.last().unwrap();
-    assert_eq!(current_year["revenue_cents"].as_i64(), Some(2599));
-    assert_eq!(current_year["order_count"].as_u64(), Some(1));
+    assert_eq!(current_year["revenue_cents"].as_i64(), Some(5198));
+    assert_eq!(current_year["order_count"].as_u64(), Some(2));
 }
 
 async fn fetch_dashboard(ctx: &helpers::TestContext) -> serde_json::Value {
@@ -147,11 +189,11 @@ async fn fetch_dashboard(ctx: &helpers::TestContext) -> serde_json::Value {
 async fn fetch_dashboard_trend(
     ctx: &helpers::TestContext,
     group_by: &str,
-    plan_id: Option<i32>,
+    app_id: Option<i32>,
 ) -> serde_json::Value {
     let mut url = format!("/api/admin/dashboard/trend?group_by={group_by}");
-    if let Some(plan_id) = plan_id {
-        url.push_str(&format!("&plan_id={plan_id}"));
+    if let Some(app_id) = app_id {
+        url.push_str(&format!("&app_id={app_id}"));
     }
     let resp = TestClient::get(helpers::get_url(&url))
         .add_header("authorization", helpers::bearer(&ctx.token), true)

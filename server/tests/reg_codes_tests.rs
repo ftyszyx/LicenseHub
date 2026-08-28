@@ -1210,6 +1210,24 @@ async fn test_count_reg_code_activation_and_exhaust() {
     assert_eq!(json["data"]["code_type"].as_i64().unwrap(), 1);
     assert_eq!(json["data"]["remaining_count"].as_i64().unwrap(), 0);
 
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    let (reg_code_remaining, device_remaining): (Option<i32>, Option<i32>) = sqlx::query_as(
+        r#"
+        select rc.remaining_count, ad.remaining
+        from reg_codes rc
+        join reg_code_devices rcd on rcd.reg_code_id = rc.id
+        join app_devices ad on ad.id = rcd.device_id
+        where rc.code = $1 and ad.device_id = $2
+        "#,
+    )
+    .bind(&code)
+    .bind("dev-count-1")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reg_code_remaining, Some(0));
+    assert_eq!(device_remaining, None);
+
     let resp = TestClient::post(helpers::get_url("/api/reg/validate"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"code":code, "app_key":app_key, "device_id":"dev-count-1"}))
@@ -1277,7 +1295,7 @@ async fn test_unbound_count_reg_code_can_switch_to_multi_device_mode() {
         .await;
     let json = print_response_body_get_json(resp, "create_single_device_count_code").await;
     assert!(json["success"].as_bool().unwrap());
-    assert!(json["data"]["remaining_count"].is_null());
+    assert_eq!(json["data"]["remaining_count"].as_i64(), Some(5));
     let reg_code_id = json["data"]["id"].as_i64().unwrap();
 
     let resp = TestClient::put(helpers::get_url(&format!(
@@ -1454,21 +1472,38 @@ async fn test_count_reg_code_shares_balance_across_devices_and_revokes_all_devic
         assert_eq!(json["data"]["remain_count"].as_i64(), Some(5));
     }
 
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    sqlx::query("update app_devices set remaining = 2 where app_id = $1 and device_id = $2")
+        .bind(app_id)
+        .bind(&device_ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"app_key": app_key, "reg_code": code, "device_id": device_ids[0]}))
+        .send(&ctx.app)
+        .await;
+    let json = print_response_body_get_json(resp, "bind_count_code_with_device_balance").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert_eq!(json["data"]["remain_count"].as_i64(), Some(7));
+
     let resp = TestClient::post(helpers::get_url("/api/reg/usecount"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"app_key": app_key, "device_id": device_ids[0], "use_count": 2}))
         .send(&ctx.app)
         .await;
-    let json = print_response_body_get_json(resp, "use_shared_count_on_first_device").await;
+    let json = print_response_body_get_json(resp, "use_code_balance_on_first_device").await;
     assert!(json["success"].as_bool().unwrap());
-    assert_eq!(json["data"]["remain_count"].as_i64(), Some(3));
+    assert_eq!(json["data"]["remain_count"].as_i64(), Some(5));
 
     let resp = TestClient::post(helpers::get_url("/api/reg/check"))
         .add_header("content-type", "application/json", true)
         .json(&json!({"app_key": app_key, "device_id": device_ids[1]}))
         .send(&ctx.app)
         .await;
-    let json = print_response_body_get_json(resp, "check_shared_count_on_second_device").await;
+    let json = print_response_body_get_json(resp, "check_code_balance_on_second_device").await;
     assert!(json["success"].as_bool().unwrap());
     assert_eq!(json["data"]["remain_count"].as_i64(), Some(3));
 
@@ -1493,7 +1528,6 @@ async fn test_count_reg_code_shares_balance_across_devices_and_revokes_all_devic
     let json = print_response_body_get_json(resp, "revoke_multi_count_code").await;
     assert!(json["success"].as_bool().unwrap());
 
-    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
     let remaining_count: Option<i32> =
         sqlx::query_scalar("select remaining_count from reg_codes where id = $1")
             .bind(reg_code_id)

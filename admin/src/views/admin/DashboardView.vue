@@ -31,13 +31,13 @@
             <div class="mt-1 text-xs text-slate-500">{{ trendRangeLabel }}</div>
           </div>
           <div class="flex flex-wrap items-center gap-3">
-            <el-select v-model="selectedPlanId" class="w-56" :placeholder="$t('dashboard.all_products')">
-              <el-option :label="$t('dashboard.all_products')" :value="0" />
+            <el-select v-model="selectedAppId" class="w-56" :placeholder="$t('dashboard.all_apps')">
+              <el-option :label="$t('dashboard.all_apps')" :value="0" />
               <el-option
-                v-for="product in trend.products"
-                :key="product.id"
-                :label="productLabel(product)"
-                :value="product.id"
+                v-for="app in trend.apps"
+                :key="app.id"
+                :label="app.name"
+                :value="app.id"
               />
             </el-select>
             <el-radio-group v-model="groupBy" size="small">
@@ -68,11 +68,11 @@
           </div>
         </div>
       </template>
-      <div v-loading="trendLoading" class="min-h-[360px]">
-        <div v-show="hasTrendData" ref="trendChartElement" class="h-[360px] w-full"></div>
+      <div v-loading="trendLoading" class="trend-chart-shell">
+        <div v-show="hasTrendData" ref="trendChartElement" class="trend-chart-canvas"></div>
         <el-empty
           v-if="!trendLoading && !hasTrendData"
-          class="h-[360px]"
+          class="trend-chart-empty"
           :description="$t('dashboard.no_trend_data')"
           :image-size="90"
         />
@@ -153,7 +153,6 @@ import type {
   DashboardStats,
   DashboardTrend,
   DashboardTrendGroupBy,
-  DashboardTrendProduct,
 } from '@/types'
 import { OrderStatus } from '@/types/payments'
 import { RoutePath } from '@/types/route'
@@ -175,13 +174,13 @@ const { t, locale } = useI18n()
 const router = useRouter()
 const loading = ref(false)
 const trendLoading = ref(false)
-const selectedPlanId = ref(0)
+const selectedAppId = ref(0)
 const groupBy = ref<DashboardTrendGroupBy>('day')
 const selectedRange = ref<[Date, Date]>(defaultTrendRange('day'))
 const valueMode = ref<TrendValueMode>('period')
 const chartType = ref<TrendChartType>('bar')
 const trendChartElement = ref<HTMLElement>()
-const trend = reactive<DashboardTrend>({ points: [], products: [] })
+const trend = reactive<DashboardTrend>({ points: [], apps: [] })
 let trendChart: EChartsType | undefined
 let resizeObserver: ResizeObserver | undefined
 let trendRequestId = 0
@@ -334,10 +333,6 @@ function onTrendRangeChange() {
   if (selectedRange.value.length === 2) void loadTrend()
 }
 
-function productLabel(product: DashboardTrendProduct) {
-  return product.app_name ? `${product.app_name} / ${product.name}` : product.name
-}
-
 function formatChartCurrency(value: number) {
   return `¥${new Intl.NumberFormat(locale.value, {
     minimumFractionDigits: 2,
@@ -446,13 +441,13 @@ async function loadTrend() {
     const [start, end] = selectedRange.value
     const data = await fetchDashboardTrend({
       group_by: groupBy.value,
-      plan_id: selectedPlanId.value || undefined,
+      app_id: selectedAppId.value || undefined,
       start_date: formatDateForApi(start),
       end_date: formatDateForApi(end),
     })
     if (requestId !== trendRequestId) return
     trend.points = data.points
-    trend.products = data.products
+    trend.apps = data.apps
     renderTrendChart()
   } finally {
     if (requestId === trendRequestId) trendLoading.value = false
@@ -471,7 +466,7 @@ watch(groupBy, (value) => {
   selectedRange.value = defaultTrendRange(value)
   void loadTrend()
 })
-watch(selectedPlanId, () => void loadTrend())
+watch(selectedAppId, () => void loadTrend())
 watch([chartType, valueMode, locale], renderTrendChart)
 
 onMounted(async () => {
@@ -488,3 +483,16 @@ onBeforeUnmount(() => {
   trendChart?.dispose()
 })
 </script>
+
+<style scoped>
+.trend-chart-shell,
+.trend-chart-canvas,
+.trend-chart-empty {
+  min-height: 360px;
+}
+
+.trend-chart-canvas {
+  width: 100%;
+  height: 360px;
+}
+</style>
