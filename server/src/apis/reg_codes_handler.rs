@@ -157,6 +157,7 @@ pub struct UpdateRegCodeReq {
     pub status: Option<i16>,
     pub code_type: Option<CodeType>,
     pub total_count: Option<i32>,
+    pub remaining_count: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
@@ -429,6 +430,7 @@ pub async fn update_impl(
             "refunded or revoked reg code cannot be changed",
         ));
     }
+    let original_code_type = CodeType::from(reg_code.code_type);
     let final_app_id = req.app_id.unwrap_or(reg_code.app_id);
     let final_code_type = req
         .code_type
@@ -460,17 +462,10 @@ pub async fn update_impl(
                 "max_devices cannot be lower than the current bound device count",
             ));
         }
-
-        let has_binding = !bound_device_ids.is_empty()
-            || RegCodeStatus::from(reg_code.status) == RegCodeStatus::Binded;
-        if (max_devices > 1) != (reg_code.max_devices > 1) && has_binding {
-            return Err(AppError::validation(
-                "cannot switch single-device and multi-device mode after reg code is bound",
-            ));
-        }
     }
     let refresh_reg_code_remaining = final_code_type == CodeType::Count
-        && RegCodeStatus::from(reg_code.status) != RegCodeStatus::Binded;
+        && RegCodeStatus::from(reg_code.status) != RegCodeStatus::Binded
+        && (req.total_count.is_some() || original_code_type != CodeType::Count);
     let (code_type, valid_days, total_count, _) = normalize_reg_code_limits_for_app(
         state,
         final_app_id,
@@ -479,6 +474,23 @@ pub async fn update_impl(
         final_total_count,
     )
     .await?;
+    if let Some(remaining_count) = req.remaining_count {
+        if code_type != CodeType::Count {
+            return Err(AppError::validation(
+                "remaining_count is only supported for count reg codes",
+            ));
+        }
+        if remaining_count < 0 {
+            return Err(AppError::validation(
+                "remaining_count must be greater than or equal to 0",
+            ));
+        }
+        if remaining_count > total_count.unwrap_or(0) {
+            return Err(AppError::validation(
+                "remaining_count cannot be greater than total_count",
+            ));
+        }
+    }
 
     let mut reg_code: reg_codes::ActiveModel = reg_code.into_active_model();
     if let Some(v) = req.code {
@@ -503,7 +515,9 @@ pub async fn update_impl(
     }
     reg_code.code_type = Set(i16::from(code_type));
     reg_code.total_count = Set(total_count);
-    if refresh_reg_code_remaining {
+    if let Some(remaining_count) = req.remaining_count {
+        reg_code.remaining_count = Set(Some(remaining_count));
+    } else if refresh_reg_code_remaining {
         reg_code.remaining_count = Set(total_count);
     } else if final_code_type == CodeType::Time {
         reg_code.remaining_count = Set(None);
@@ -1065,19 +1079,6 @@ async fn require_license_signing_private_key_b64(state: &AppState) -> Result<Str
     Ok(private_key_b64)
 }
 
-fn ensure_reg_code_bound_to_current_device(
-    device_model: Option<&app_devices::Model>,
-    reg_code_model: &reg_codes::Model,
-) -> Result<(), AppError> {
-    match (reg_code_model.device_id, device_model) {
-        (Some(bound_device_id), Some(device_model)) if device_model.id == bound_device_id => Ok(()),
-        (Some(_), _) => Err(AppError::Message(
-            "reg code already bound to another device".into(),
-        )),
-        (None, _) => Ok(()),
-    }
-}
-
 enum BoundEntitlement {
     Time(DateTime<FixedOffset>),
     Count(i32),
@@ -1287,13 +1288,13 @@ async fn bind_code_level_entitlement(
     }
 
     let had_binding_time = reg_code.binding_time.is_some();
-    let had_legacy_device = reg_code.device_id.is_some();
+    let had_primary_device = reg_code.device_id.is_some();
     let mut active_reg_code = reg_code.into_active_model();
     if !had_binding_time {
         active_reg_code.binding_time = Set(Some(now));
     }
     active_reg_code.status = Set(i16::from(RegCodeStatus::Binded));
-    if !had_legacy_device {
+    if !had_primary_device {
         active_reg_code.device_id = Set(Some(device.id));
     }
     if let BoundEntitlement::Count(remaining) = &entitlement {
@@ -1317,7 +1318,6 @@ pub async fn bind_code_impl(
     req: RegCodeBindReq,
 ) -> Result<RegCodeStatusResp, AppError> {
     let app_model = find_app_by_key(state, &req.app_key).await?;
-    let device_model = find_device_by_app_and_id(state, app_model.id, &req.device_id).await?;
     let reg_code_model = find_reg_code_by_app_and_code(state, app_model.id, &req.reg_code).await?;
     if matches!(
         RegCodeStatus::from(reg_code_model.status),
@@ -1338,44 +1338,24 @@ pub async fn bind_code_impl(
     }
     let private_key_b64 = require_license_signing_private_key_b64(state).await?;
 
-    let uses_code_level_entitlement = reg_code_model.max_devices > 1
-        || CodeType::from(reg_code_model.code_type) == CodeType::Count;
-    if uses_code_level_entitlement {
-        return match bind_code_level_entitlement(
+    match bind_code_level_entitlement(state, &app_model, &req.device_id, reg_code_model.id, 0)
+        .await?
+    {
+        BoundEntitlement::Time(expire_time) => time_status_resp(
             state,
+            &private_key_b64,
             &app_model,
             &req.device_id,
-            reg_code_model.id,
-            0,
-        )
-        .await?
-        {
-            BoundEntitlement::Time(expire_time) => time_status_resp(
-                state,
-                &private_key_b64,
-                &app_model,
-                &req.device_id,
-                expire_time,
-            ),
-            BoundEntitlement::Count(remaining) => count_status_resp(
-                state,
-                &private_key_b64,
-                &app_model,
-                &req.device_id,
-                remaining,
-            ),
-        };
+            expire_time,
+        ),
+        BoundEntitlement::Count(remaining) => count_status_resp(
+            state,
+            &private_key_b64,
+            &app_model,
+            &req.device_id,
+            remaining,
+        ),
     }
-
-    bind_time_reg_code(
-        state,
-        &private_key_b64,
-        &app_model,
-        &req.device_id,
-        device_model,
-        &reg_code_model,
-    )
-    .await
 }
 
 pub async fn check_device_impl(
@@ -1591,71 +1571,6 @@ pub async fn use_count_impl(state: &AppState, req: UseCountReq) -> Result<UseCou
     })
 }
 
-pub async fn bind_time_reg_code(
-    state: &AppState,
-    private_key_b64: &str,
-    app_model: &apps::Model,
-    device_id: &str,
-    device_model: Option<app_devices::Model>,
-    reg_code_model: &reg_codes::Model,
-) -> Result<RegCodeStatusResp, AppError> {
-    if CodeType::from(reg_code_model.code_type) != CodeType::Time {
-        return Err(AppError::Message("code type is not time".into()));
-    }
-
-    let now = Utc::now().fixed_offset();
-    if reg_code_model.device_id.is_some() {
-        ensure_reg_code_bound_to_current_device(device_model.as_ref(), reg_code_model)?;
-        let device_model =
-            device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
-        let expire_time = device_model.expire_time.unwrap_or(now);
-        if expire_time <= now {
-            return Err(AppError::Message("device expired".into()));
-        }
-        return time_status_resp(state, private_key_b64, app_model, device_id, expire_time);
-    }
-
-    let tx = state.db.begin().await?;
-    let mut active_reg_model = reg_code_model.clone().into_active_model();
-    active_reg_model.binding_time = Set(Some(now));
-    active_reg_model.status = Set(RegCodeStatus::Binded.into());
-
-    let expire_time = match device_model {
-        Some(device_model) => {
-            let current_expire = device_model.expire_time.unwrap_or(now);
-            let current_expire = if current_expire < now {
-                now
-            } else {
-                current_expire
-            };
-            let new_expire_time =
-                current_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
-
-            active_reg_model.device_id = Set(Some(device_model.id));
-            let mut active_device_model = device_model.into_active_model();
-            active_device_model.expire_time = Set(Some(new_expire_time));
-            active_device_model.update(&tx).await?;
-            new_expire_time
-        }
-        None => {
-            let new_expire_time = now + chrono::Duration::days(reg_code_model.valid_days as i64);
-            let device_active = app_devices::ActiveModel {
-                app_id: Set(app_model.id),
-                device_id: Set(device_id.to_string()),
-                expire_time: Set(Some(new_expire_time)),
-                ..Default::default()
-            };
-            let inserted_device = device_active.insert(&tx).await?;
-            active_reg_model.device_id = Set(Some(inserted_device.id));
-            new_expire_time
-        }
-    };
-
-    active_reg_model.update(&tx).await?;
-    tx.commit().await?;
-    time_status_resp(state, private_key_b64, app_model, device_id, expire_time)
-}
-
 pub async fn validate_code_impl(
     state: &AppState,
     req: RegCodeValidateReq,
@@ -1711,36 +1626,31 @@ pub async fn validate_code_impl(
             },
         ));
     }
-    let uses_code_level_entitlement = reg_code_model.max_devices > 1
-        || CodeType::from(reg_code_model.code_type) == CodeType::Count;
-    if uses_code_level_entitlement {
-        let consume_count = if CodeType::from(app_model.code_type) == CodeType::Count {
-            1
-        } else {
-            0
-        };
-        return match bind_code_level_entitlement(
-            state,
-            &app_model,
-            &device_id,
-            reg_code_model.id,
-            consume_count,
-        )
-        .await?
-        {
-            BoundEntitlement::Time(expire_time) => Ok(RegCodeValidateResp {
-                code_type: CodeType::Time,
-                expire_time: Some(expire_time),
-                remaining_count: None,
-            }),
-            BoundEntitlement::Count(remaining_count) => Ok(RegCodeValidateResp {
-                code_type: CodeType::Count,
-                expire_time: None,
-                remaining_count: Some(remaining_count),
-            }),
-        };
+    let consume_count = if CodeType::from(app_model.code_type) == CodeType::Count {
+        1
+    } else {
+        0
+    };
+    match bind_code_level_entitlement(
+        state,
+        &app_model,
+        &device_id,
+        reg_code_model.id,
+        consume_count,
+    )
+    .await?
+    {
+        BoundEntitlement::Time(expire_time) => Ok(RegCodeValidateResp {
+            code_type: CodeType::Time,
+            expire_time: Some(expire_time),
+            remaining_count: None,
+        }),
+        BoundEntitlement::Count(remaining_count) => Ok(RegCodeValidateResp {
+            code_type: CodeType::Count,
+            expire_time: None,
+            remaining_count: Some(remaining_count),
+        }),
     }
-    time_reg_code_validate(state, &app_model, &device_id, dev, &reg_code_model).await
 }
 //试用
 pub async fn trial_validate(
@@ -1814,75 +1724,4 @@ pub async fn trial_validate(
             })
         }
     }
-}
-
-//时间类型注册码验证
-pub async fn time_reg_code_validate(
-    state: &AppState,
-    app_model: &apps::Model,
-    device_id: &str,
-    device_model: Option<app_devices::Model>,
-    reg_code_model: &reg_codes::Model,
-) -> Result<RegCodeValidateResp, AppError> {
-    let now = Utc::now().fixed_offset();
-    if CodeType::from(reg_code_model.code_type) != CodeType::Time {
-        return Err(AppError::Message("code type is not time".into()));
-    }
-    // update reg_code binding if needed
-    if reg_code_model.device_id.is_none() {
-        let tx = state.db.begin().await?;
-        let mut active_reg_model = reg_code_model.clone().into_active_model();
-        active_reg_model.binding_time = Set(Some(now));
-        active_reg_model.status = Set(RegCodeStatus::Binded.into());
-        let expire_time: DateTime<FixedOffset> = match device_model {
-            Some(dm) => {
-                active_reg_model.device_id = Set(Some(dm.id));
-                let device_expire = dm.expire_time.unwrap_or(now);
-                //check device expire time, if it is less than now, use now as device expire time
-                let device_expire = if device_expire < now {
-                    now
-                } else {
-                    device_expire
-                };
-                let expire_time =
-                    device_expire + chrono::Duration::days(reg_code_model.valid_days as i64);
-                let mut active_device_model = dm.into_active_model();
-                active_device_model.expire_time = Set(Some(expire_time));
-                active_device_model.update(&tx).await?;
-                expire_time
-            }
-            None => {
-                let expire_time = now + chrono::Duration::days(reg_code_model.valid_days as i64);
-                //add device
-                let device_active = app_devices::ActiveModel {
-                    app_id: Set(app_model.id),
-                    device_id: Set(device_id.to_string()),
-                    expire_time: Set(Some(expire_time)),
-                    ..Default::default()
-                };
-                let inserted_device = device_active.insert(&tx).await?;
-                active_reg_model.device_id = Set(Some(inserted_device.id));
-                expire_time
-            }
-        };
-        active_reg_model.update(&tx).await?;
-        tx.commit().await?;
-        return Ok(RegCodeValidateResp {
-            code_type: CodeType::Time,
-            expire_time: Some(expire_time),
-            remaining_count: None,
-        });
-    }
-
-    // update device final expire_time (cache) if needed
-    let device_model = device_model.ok_or_else(|| AppError::Message("device not found".into()))?;
-    let current_device_expire = device_model.expire_time.unwrap_or(now);
-    if current_device_expire <= now {
-        return Err(AppError::Message("device expired".into()));
-    }
-    Ok(RegCodeValidateResp {
-        code_type: CodeType::Time,
-        expire_time: Some(current_device_expire),
-        remaining_count: None,
-    })
 }

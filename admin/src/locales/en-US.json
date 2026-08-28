@@ -171,7 +171,9 @@
     "status_locked": "Binded reg code status cannot be changed",
     "delete_locked": "Only unused reg codes can be deleted",
     "device_id": "Device IDs",
-    "device_usage": "Bound / limit"
+    "device_usage": "Bound / limit",
+    "edit_title": "Edit registration code",
+    "remaining_count": "Remaining count"
   },
   "products": {
     "input_name": "Enter name",

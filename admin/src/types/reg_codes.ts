@@ -51,6 +51,11 @@ export interface BatchCreateRegCodesReq {
   total_count?: number | null
 }
 
+export interface UpdateRegCodeReq {
+  max_devices: number
+  remaining_count?: number
+}
+
 export interface BindRegCodeReq {
   app_key: string
   reg_code: string

@@ -53,6 +53,8 @@
         <template v-if="query.code_type === RegCodeType.Count">
           <el-table-column prop="total_count" :label="$t('reg_codes.total_count')" width="120">
           </el-table-column>
+          <el-table-column prop="remaining_count" :label="$t('reg_codes.remaining_count')" width="120">
+          </el-table-column>
         </template>
         <el-table-column prop="status" :label="$t('reg_codes.status')" width="100">
           <template #default="{ row }">
@@ -72,7 +74,14 @@
         </el-table-column>
         <el-table-column :label="$t('common.actions')" width="220" fixed="right" align="right">
           <template #default="{ row }">
-            <div class="flex justify-end gap-2">
+            <div class="reg-code-actions flex flex-wrap justify-end gap-2">
+              <el-tooltip v-if="row.status !== RegCodeStatus.Refunded && row.status !== RegCodeStatus.Revoked"
+                :content="$t('common.edit')" placement="top">
+                <el-button size="small" type="primary" plain circle :aria-label="$t('common.edit')"
+                  @click="openEditDialog(row)">
+                  <el-icon><EditIcon /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="primary" plain @click="markIssued(row)">{{ $t('reg_codes.mark_issued') }}</el-button>
               <el-button v-if="row.status !== RegCodeStatus.Refunded && row.status !== RegCodeStatus.Revoked" size="small" type="warning" plain @click="revoke(row)">{{ $t('reg_codes.revoke') }}</el-button>
               <el-button v-if="row.status === RegCodeStatus.Unused" size="small" type="danger" plain @click="del(row.id)">{{ $t('common.delete') }}</el-button>
@@ -86,6 +95,32 @@
           @size-change="handleSizeChange" />
       </div>
     </el-card>
+
+    <el-dialog v-model="editForm.visible" :title="$t('reg_codes.edit_title')"
+      width="min(440px, calc(100vw - 32px))" destroy-on-close>
+      <el-form label-width="120px">
+        <el-form-item :label="$t('reg_codes.code')">
+          <el-input v-model="editForm.code" disabled />
+        </el-form-item>
+        <el-form-item :label="$t('apps.max_devices')">
+          <el-input-number v-model="editForm.max_devices" :min="Math.max(1, editForm.bound_device_count)"
+            :max="10000" controls-position="right" class="w-full" />
+        </el-form-item>
+        <template v-if="editForm.code_type === RegCodeType.Count">
+          <el-form-item :label="$t('reg_codes.total_count')">
+            <el-input-number v-model="editForm.total_count" disabled class="w-full" />
+          </el-form-item>
+          <el-form-item :label="$t('reg_codes.remaining_count')">
+            <el-input-number v-model="editForm.remaining_count" :min="0" :max="editForm.total_count"
+              controls-position="right" class="w-full" />
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="editForm.visible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="editForm.saving" @click="submitEdit">{{ $t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="batch.visible" :title="$t('reg_codes.batch_create')" width="520px">
       <el-form label-width="140px">
@@ -114,14 +149,15 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, watch } from 'vue'
-import { fetchRegCodes, deleteRegCode, batchCreateRegCodes, updateRegCodeStatus, revokeRegCode } from '@/apis/reg_codes'
+import { fetchRegCodes, deleteRegCode, batchCreateRegCodes, updateRegCodeStatus, revokeRegCode, updateRegCode } from '@/apis/reg_codes'
 import { fetchApps } from '@/apis/apps'
-import type { RegCodeModel, ListRegCodesParams, BatchCreateRegCodesReq } from '@/types/reg_codes'
+import type { RegCodeModel, ListRegCodesParams, BatchCreateRegCodesReq, UpdateRegCodeReq } from '@/types/reg_codes'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { RegCodeStatus, RegCodeType } from '@/types/reg_codes'
 import { formatTime } from '@/utils'
 import { fetchAllPages } from '@/utils/pagination'
+import { Edit as EditIcon } from '@element-plus/icons-vue'
 const { t } = useI18n()
 
 const statusOptions = (Object.values(RegCodeStatus).filter(v => typeof v === 'number') as number[]).map(v => {
@@ -146,6 +182,17 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const selectedIds = ref<number[]>([])
+const editForm = reactive({
+  visible: false,
+  saving: false,
+  id: 0,
+  code: '',
+  code_type: RegCodeType.Time,
+  max_devices: 1,
+  bound_device_count: 0,
+  total_count: 0,
+  remaining_count: 0,
+})
 
 const query = reactive<ListRegCodesParams>({ code: '', device_id: '', app_id: undefined, code_type: RegCodeType.Time })
 
@@ -165,6 +212,34 @@ function resetFilters() { query.code = ''; query.device_id = ''; query.app_id = 
 function onSelChange(arr: RegCodeModel[]) { selectedIds.value = arr.map(it => it.id) }
 function handlePageChange(p: number) { page.value = p; reload() }
 function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reload() }
+
+function openEditDialog(row: RegCodeModel) {
+  const boundDeviceCount = row.bound_device_count ?? (row.device_id ? 1 : 0)
+  editForm.id = row.id
+  editForm.code = row.code
+  editForm.code_type = row.code_type
+  editForm.bound_device_count = boundDeviceCount
+  editForm.max_devices = Math.max(1, boundDeviceCount, row.max_devices)
+  editForm.total_count = row.total_count ?? 0
+  editForm.remaining_count = row.remaining_count ?? 0
+  editForm.visible = true
+}
+
+async function submitEdit() {
+  const payload: UpdateRegCodeReq = { max_devices: editForm.max_devices }
+  if (editForm.code_type === RegCodeType.Count) {
+    payload.remaining_count = editForm.remaining_count
+  }
+  editForm.saving = true
+  try {
+    await updateRegCode(editForm.id, payload)
+    editForm.visible = false
+    ElMessage.success(t('common.saved'))
+    await reload()
+  } finally {
+    editForm.saving = false
+  }
+}
 
 async function del(id: number) {
   await ElMessageBox.confirm(t('reg_codes.delete_code_confirm'), t('common.confirm'), { type: 'warning' })
@@ -256,4 +331,14 @@ async function loadApps() {
 watch(() => batch.app_id, applyBatchAppType)
 </script>
 
-<style scoped></style>
+<style scoped>
+.reg-code-actions :deep(.el-button) {
+  flex: 0 0 auto;
+  margin-left: 0;
+}
+
+.reg-code-actions {
+  max-width: 100%;
+  white-space: normal;
+}
+</style>

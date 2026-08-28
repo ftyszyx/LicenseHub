@@ -10,6 +10,7 @@ import type {
   RegCodeBindCheckResp,
   UseCountReq,
   UseCountResp,
+  UpdateRegCodeReq,
 } from '@/types/reg_codes'
 
 export const fetchRegCodes = async (params: ListRegCodesParams = {}) => {
@@ -29,6 +30,11 @@ export const updateRegCodeStatus = async (id: number, status: RegCodeStatus) => 
 
 export const revokeRegCode = async (id: number) => {
   const response = await request.post(`/admin/reg_codes/${id}/revoke`) as ApiResponse<RegCodeModel>
+  return response.data
+}
+
+export const updateRegCode = async (id: number, payload: UpdateRegCodeReq) => {
+  const response = await request.put(`/admin/reg_codes/${id}`, payload) as ApiResponse<RegCodeModel>
   return response.data
 }
 

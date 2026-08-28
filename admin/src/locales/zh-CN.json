@@ -434,7 +434,9 @@
     "status_locked": "已绑定的注册码不允许修改状态",
     "delete_locked": "仅未使用的注册码允许删除",
     "device_id": "设备ID",
-    "device_usage": "已绑定/上限"
+    "device_usage": "已绑定/上限",
+    "edit_title": "编辑注册码",
+    "remaining_count": "剩余次数"
   },
   "permissions": {
     "policy_add": "添加策略",
