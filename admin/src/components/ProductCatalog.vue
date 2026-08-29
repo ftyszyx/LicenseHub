@@ -555,7 +555,7 @@ onBeforeUnmount(stopPolling)
               </span>
             </div>
 
-            <p class="mt-4 min-h-12 text-sm leading-6 text-slate-600">{{ planDescription(plan) }}</p>
+            <p class="plan-description mt-4 min-h-12 text-sm leading-6 text-slate-600">{{ planDescription(plan) }}</p>
 
             <div class="mt-5 grid grid-cols-2 gap-3 border-y border-slate-100 py-4">
               <div>
@@ -707,3 +707,10 @@ onBeforeUnmount(stopPolling)
     </div>
   </section>
 </template>
+
+<style scoped>
+.plan-description {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+</style>
