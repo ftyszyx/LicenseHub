@@ -1,6 +1,7 @@
 {
   "api_errors": {
-    "REG_CODE_DEVICE_LIMIT_REACHED": "This activation code has reached its device limit"
+    "REG_CODE_DEVICE_LIMIT_REACHED": "This activation code has reached its device limit",
+    "ORDER_QUERY_RATE_LIMITED": "Too many queries. Please try again in one minute."
   },
   "products_page": {
     "title": "Our Products",
@@ -57,11 +58,24 @@
   },
   "order_query": {
     "title": "Order Lookup",
-    "subtitle": "Enter your order number to check payment status and registration code.",
-    "input_placeholder": "Enter order number",
+    "subtitle": "Look up order details by system order number, purchase email, or registration code.",
+    "lookup_order_no": "System order no.",
+    "lookup_buyer_email": "Purchase email",
+    "lookup_reg_code": "Registration code",
+    "placeholder_order_no": "Enter system order number",
+    "placeholder_buyer_email": "Enter the email used for purchase",
+    "placeholder_reg_code": "Enter registration code",
     "search": "Search",
-    "not_found": "No order found. Please check the order number.",
-    "copy_reg_code": "Copy registration code"
+    "not_found": "No order found. Please check the search value.",
+    "result_count": "Found {count} order(s)",
+    "provider_trade_no": "Provider order number",
+    "buyer_email": "Purchase email",
+    "paid_at": "Paid at",
+    "amount": "Order amount",
+    "payment_provider": "Payment provider",
+    "copy_reg_code": "Copy registration code",
+    "reg_code_not_generated": "Not generated yet",
+    "test_order_without_reg_code": "Test orders do not receive registration codes"
   },
   "common": {
     "lang_zh_cn": "Simplified Chinese",
@@ -494,6 +508,10 @@
   },
   "system_settings": {
     "title": "System Settings",
+    "order_query_security_title": "Order Lookup Security",
+    "order_query_rate_limit": "Query limit",
+    "order_query_rate_limit_help": "Maximum queries allowed from one client IP within 60 seconds. All lookup methods share the limit.",
+    "per_minute": "per minute",
     "storefront_title": "Storefront title",
     "storefront_title_placeholder": "Enter storefront title",
     "storefront_title_help": "Shown as the brand title in the storefront header.",

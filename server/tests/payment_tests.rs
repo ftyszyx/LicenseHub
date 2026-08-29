@@ -216,12 +216,70 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
     assert!(json["data"].get("pay_url").is_none());
     assert!(json["data"].get("qr_code").is_none());
     assert!(json["data"].get("url_scheme").is_none());
-    assert!(
-        json["data"]["reg_code"]
-            .as_str()
-            .unwrap()
-            .starts_with("LH-")
+    assert_eq!(
+        json["data"]["provider_trade_no"].as_str(),
+        notification.provider_trade_no.as_deref()
     );
+    assert_eq!(
+        json["data"]["buyer_email"].as_str(),
+        Some("payment-test@example.com")
+    );
+    assert!(json["data"]["paid_at"].as_str().is_some());
+    let reg_code = json["data"]["reg_code"].as_str().unwrap().to_string();
+    assert!(reg_code.starts_with("LH-"));
+
+    for (lookup_type, value) in [
+        ("order_no", order_no.to_ascii_lowercase()),
+        ("buyer_email", "PAYMENT-TEST@example.com".to_string()),
+        ("reg_code", reg_code.to_ascii_lowercase()),
+    ] {
+        let resp = TestClient::get(helpers::get_url(&format!(
+            "/api/order-query?type={lookup_type}&value={value}"
+        )))
+        .send(&ctx.app)
+        .await;
+        let json = helpers::print_response_body_get_json(
+            resp,
+            &format!("public_order_lookup_{lookup_type}"),
+        )
+        .await;
+        assert!(json["success"].as_bool().unwrap());
+        let matches = json["data"].as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        let matched = &matches[0];
+        assert_eq!(matched["order_no"].as_str(), Some(order_no.as_str()));
+        assert_eq!(
+            matched["provider_trade_no"].as_str(),
+            notification.provider_trade_no.as_deref()
+        );
+        assert_eq!(
+            matched["buyer_email"].as_str(),
+            Some("payment-test@example.com")
+        );
+        assert_eq!(matched["amount_cents"].as_i64(), Some(123));
+        assert!(matched["paid_at"].as_str().is_some());
+        if lookup_type == "buyer_email" {
+            assert!(matched.get("reg_code").is_none());
+        } else {
+            assert_eq!(matched["reg_code"].as_str(), Some(reg_code.as_str()));
+        }
+        assert!(matched.get("reg_code_id").is_none());
+    }
+
+    let resp = TestClient::get(helpers::get_url(
+        "/api/order-query?type=order_no&value=LH-NOT-AN-ORDER",
+    ))
+    .send(&ctx.app)
+    .await;
+    let json = helpers::print_response_body_get_json(resp, "public_order_lookup_not_found").await;
+    assert!(json["success"].as_bool().unwrap());
+    assert!(json["data"].as_array().unwrap().is_empty());
+
+    let resp = TestClient::get(helpers::get_url("/api/order-query?type=buyer_email&value="))
+        .send(&ctx.app)
+        .await;
+    let json = helpers::print_response_body_get_json(resp, "public_order_lookup_empty_email").await;
+    assert!(!json["success"].as_bool().unwrap());
 
     process_payment_notification(&ctx.app_state, notification)
         .await

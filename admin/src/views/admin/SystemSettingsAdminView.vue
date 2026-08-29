@@ -77,6 +77,26 @@
     </el-card>
 
     <el-card shadow="never">
+      <template #header><h3 class="text-base font-semibold">{{ $t('system_settings.order_query_security_title') }}</h3></template>
+      <el-form v-loading="loading" :model="form" label-width="170px" class="max-w-3xl">
+        <el-form-item :label="$t('system_settings.order_query_rate_limit')">
+          <div>
+            <div class="flex items-center gap-2">
+              <el-input-number
+                v-model="form.order_query_rate_limit_per_minute"
+                :min="1"
+                :max="1000"
+                controls-position="right"
+              />
+              <span class="text-sm text-gray-500">{{ $t('system_settings.per_minute') }}</span>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">{{ $t('system_settings.order_query_rate_limit_help') }}</p>
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never">
       <template #header><h3 class="text-base font-semibold">分销设置</h3></template>
       <el-form v-loading="loading" :model="form" label-width="170px" class="max-w-3xl">
         <el-form-item label="开放分销功能">
@@ -242,6 +262,7 @@ const form = reactive<SettingsForm>({
   storefront_title: 'LicenseHub',
   registration_enabled: false,
   resource_storage_channel_id: 0,
+  order_query_rate_limit_per_minute: 5,
   distribution_enabled: false,
   distribution_referrer_binding_enabled: false,
   distribution_default_rate_bps: 2000,
@@ -294,6 +315,7 @@ function assignSettings(data: SiteSettings) {
   form.storefront_title = data.storefront_title || 'LicenseHub'
   form.registration_enabled = Boolean(data.registration_enabled)
   form.resource_storage_channel_id = data.resource_storage_channel_id ?? 0
+  form.order_query_rate_limit_per_minute = data.order_query_rate_limit_per_minute ?? 5
   form.distribution_enabled = Boolean(data.distribution?.enabled)
   form.distribution_referrer_binding_enabled = Boolean(data.distribution?.referrer_binding_enabled)
   form.distribution_default_rate_bps = data.distribution?.default_rate_bps ?? 2000
@@ -330,6 +352,7 @@ async function submit() {
       storefront_title: form.storefront_title.trim(),
       registration_enabled: form.registration_enabled,
       resource_storage_channel_id: form.resource_storage_channel_id,
+      order_query_rate_limit_per_minute: form.order_query_rate_limit_per_minute,
       distribution_enabled: form.distribution_enabled,
       distribution_referrer_binding_enabled: form.distribution_referrer_binding_enabled,
       distribution_default_rate_bps: Math.round(form.distribution_default_rate_percent * 100),

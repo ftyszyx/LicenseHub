@@ -3,7 +3,8 @@
     "title": "AppPay 管理后台"
   },
   "api_errors": {
-    "REG_CODE_DEVICE_LIMIT_REACHED": "该激活码绑定设备数量已达上限"
+    "REG_CODE_DEVICE_LIMIT_REACHED": "该激活码绑定设备数量已达上限",
+    "ORDER_QUERY_RATE_LIMITED": "查询过于频繁，请1分钟后重试"
   },
   "common": {
     "language": "语言",
@@ -269,11 +270,24 @@
   },
   "order_query": {
     "title": "订单查询",
-    "subtitle": "输入购买时生成的订单号，查询支付状态和注册码。",
-    "input_placeholder": "请输入订单号",
+    "subtitle": "可通过系统订单号、购买邮箱或注册码查询订单详情。",
+    "lookup_order_no": "系统订单号",
+    "lookup_buyer_email": "购买邮箱",
+    "lookup_reg_code": "注册码",
+    "placeholder_order_no": "请输入系统订单号",
+    "placeholder_buyer_email": "请输入购买时填写的邮箱",
+    "placeholder_reg_code": "请输入注册码",
     "search": "查询",
-    "not_found": "未查询到订单，请检查订单号是否正确",
-    "copy_reg_code": "复制注册码"
+    "not_found": "未查询到订单，请检查查询内容是否正确",
+    "result_count": "查询到 {count} 笔订单",
+    "provider_trade_no": "支付渠道订单号",
+    "buyer_email": "购买邮箱",
+    "paid_at": "支付时间",
+    "amount": "订单金额",
+    "payment_provider": "支付渠道",
+    "copy_reg_code": "复制注册码",
+    "reg_code_not_generated": "尚未生成",
+    "test_order_without_reg_code": "测试订单不分配注册码"
   },
   "products_page": {
     "title": "我们的产品",
@@ -501,6 +515,10 @@
   },
   "system_settings": {
     "title": "系统设置",
+    "order_query_security_title": "订单查询安全",
+    "order_query_rate_limit": "查询次数上限",
+    "order_query_rate_limit_help": "同一客户端 IP 在60秒内允许的最大查询次数，三种查询方式共享额度。",
+    "per_minute": "次/分钟",
     "storefront_title": "商城首页标题",
     "storefront_title_placeholder": "请输入商城首页标题",
     "storefront_title_help": "显示在商城首页左上角的品牌标题。",

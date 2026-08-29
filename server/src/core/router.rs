@@ -427,6 +427,9 @@ pub fn create_router(app_state: AppState) -> Service {
         .push(Router::with_path("/api/orders").post(apis::payment_handler::create_order))
         .push(Router::with_path("/api/orders/{order_no}").get(apis::payment_handler::get_order))
         .push(
+            Router::with_path("/api/order-query").get(apis::payment_handler::lookup_public_orders),
+        )
+        .push(
             Router::with_path("/api/pay/wechat/native/notify")
                 .post(apis::payment_handler::wechat_native_notify),
         )

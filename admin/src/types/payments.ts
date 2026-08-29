@@ -98,6 +98,32 @@ export interface OrderModel {
   updated_at: string
 }
 
+export type PublicOrderLookupType = 'order_no' | 'buyer_email' | 'reg_code'
+
+export interface PublicOrderLookupParams {
+  type: PublicOrderLookupType
+  value: string
+}
+
+export interface PublicOrderLookupModel {
+  id: number
+  order_no: string
+  plan_id: number
+  plan_name?: string | null
+  app_id: number
+  app_name?: string | null
+  amount_cents: number
+  pay_type: string
+  status: OrderStatus
+  provider: string
+  provider_trade_no?: string | null
+  reg_code?: string | null
+  buyer_email?: string | null
+  paid_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type ListOrdersParams = {
   order_no?: string
   reg_code?: string

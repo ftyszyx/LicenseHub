@@ -13,6 +13,8 @@ import type {
   PaymentChannel,
   PayMethodsInfo,
   PublicPlansInfo,
+  PublicOrderLookupParams,
+  PublicOrderLookupModel,
   SavePaymentChannelReq,
   SavePlanReq,
 } from '@/types/payments'
@@ -44,6 +46,11 @@ export const createOrder = async (payload: CreateOrderReq) => {
 
 export const fetchOrder = async (orderNo: string) => {
   const response = await request.get(`/orders/${orderNo}`) as ApiResponse<OrderModel>
+  return response.data
+}
+
+export const fetchPublicOrders = async (params: PublicOrderLookupParams) => {
+  const response = await request.get('/order-query', { params }) as ApiResponse<PublicOrderLookupModel[]>
   return response.data
 }
 

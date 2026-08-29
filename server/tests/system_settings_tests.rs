@@ -24,13 +24,15 @@ async fn test_system_settings_storefront_title() {
         json["data"]["distribution"]["referrer_binding_enabled"],
         false
     );
+    assert_eq!(json["data"]["order_query_rate_limit_per_minute"], 5);
 
     let resp = TestClient::put(helpers::get_url("/api/admin/system-settings"))
         .add_header("authorization", helpers::bearer(&ctx.token), true)
         .add_header("content-type", "application/json", true)
         .json(&json!({
             "storefront_title": "慧达电脑科技",
-            "distribution_referrer_binding_enabled": true
+            "distribution_referrer_binding_enabled": true,
+            "order_query_rate_limit_per_minute": 7
         }))
         .send(&ctx.app)
         .await;
@@ -45,6 +47,7 @@ async fn test_system_settings_storefront_title() {
         json["data"]["distribution"]["referrer_binding_enabled"],
         true
     );
+    assert_eq!(json["data"]["order_query_rate_limit_per_minute"], 7);
 
     let resp = TestClient::get(helpers::get_url("/api/site-settings"))
         .send(&ctx.app)
@@ -56,6 +59,7 @@ async fn test_system_settings_storefront_title() {
         json["data"]["storefront_title"].as_str().unwrap(),
         "慧达电脑科技"
     );
+    assert_eq!(json["data"]["order_query_rate_limit_per_minute"], 7);
     assert_eq!(
         json["data"]["distribution"]["referrer_binding_enabled"],
         true

@@ -11,6 +11,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Duration as StdDuration;
 
 const STOREFRONT_TITLE_KEY: &str = "storefront_title";
 pub const LICENSE_SIGNING_PRIVATE_KEY_KEY: &str = "license_signing_private_key_b64";
@@ -23,6 +24,9 @@ pub const DISTRIBUTION_HOLDING_DAYS_KEY: &str = "distribution_holding_days";
 pub const DISTRIBUTION_MIN_WITHDRAW_CENTS_KEY: &str = "distribution_min_withdraw_cents";
 pub const REGISTRATION_ENABLED_KEY: &str = "registration_enabled";
 pub const RESOURCE_STORAGE_CHANNEL_ID_KEY: &str = "resource_storage_channel_id";
+pub const ORDER_QUERY_RATE_LIMIT_PER_MINUTE_KEY: &str = "order_query_rate_limit_per_minute";
+const ORDER_QUERY_RATE_LIMIT_CACHE_KEY: &str = "settings:order-query-rate-limit-per-minute";
+const DEFAULT_ORDER_QUERY_RATE_LIMIT_PER_MINUTE: i32 = 5;
 const EMAIL_SERVICE_MODE_KEY: &str = "email_service_mode";
 const EMAIL_FROM_KEY: &str = "email_from";
 const EMAIL_SMTP_HOST_KEY: &str = "email_smtp_host";
@@ -36,6 +40,7 @@ pub struct SiteSettingsInfo {
     pub storefront_title: String,
     pub registration_enabled: bool,
     pub resource_storage_channel_id: i32,
+    pub order_query_rate_limit_per_minute: i32,
     pub distribution: DistributionSettingsInfo,
     pub license_signing: LicenseSigningInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,6 +85,7 @@ pub struct UpdateSystemSettingsReq {
     pub storefront_title: String,
     pub registration_enabled: Option<bool>,
     pub resource_storage_channel_id: Option<i32>,
+    pub order_query_rate_limit_per_minute: Option<i32>,
     pub distribution_enabled: Option<bool>,
     pub distribution_referrer_binding_enabled: Option<bool>,
     pub distribution_default_rate_bps: Option<i32>,
@@ -179,6 +185,7 @@ pub async fn get_site_settings_impl(
             .unwrap_or_else(|| DEFAULT_STOREFRONT_TITLE.to_string()),
         registration_enabled: get_registration_enabled(state).await?,
         resource_storage_channel_id: get_resource_storage_channel_id(state).await?,
+        order_query_rate_limit_per_minute: get_order_query_rate_limit_per_minute(state).await?,
         distribution: get_distribution_settings(state).await?,
         license_signing: get_license_signing_info(state, include_private_key).await?,
         email: if include_private_key {
@@ -206,6 +213,10 @@ pub async fn update_system_settings_impl(
     if let Some(value) = req.resource_storage_channel_id {
         validate_resource_storage_channel(state, value).await?;
         updates.push((RESOURCE_STORAGE_CHANNEL_ID_KEY, value.to_string()));
+    }
+    if let Some(value) = req.order_query_rate_limit_per_minute {
+        validate_range("order_query_rate_limit_per_minute", value, 1, 1000)?;
+        updates.push((ORDER_QUERY_RATE_LIMIT_PER_MINUTE_KEY, value.to_string()));
     }
     if let Some(value) = req.distribution_enabled {
         updates.push((DISTRIBUTION_ENABLED_KEY, value.to_string()));
@@ -276,6 +287,12 @@ pub async fn update_system_settings_impl(
     }
     tx.commit().await?;
 
+    if req.order_query_rate_limit_per_minute.is_some() {
+        if let Err(error) = state.redis.del(ORDER_QUERY_RATE_LIMIT_CACHE_KEY).await {
+            tracing::warn!("failed to invalidate order query rate limit cache: {error}");
+        }
+    }
+
     get_site_settings_impl(state, true).await
 }
 
@@ -303,6 +320,38 @@ pub async fn get_registration_enabled(state: &AppState) -> Result<bool, AppError
 
 pub async fn get_resource_storage_channel_id(state: &AppState) -> Result<i32, AppError> {
     setting_i32(state, RESOURCE_STORAGE_CHANNEL_ID_KEY, 0).await
+}
+
+pub async fn get_order_query_rate_limit_per_minute(state: &AppState) -> Result<i32, AppError> {
+    if let Some(value) = state
+        .redis
+        .get::<i32>(ORDER_QUERY_RATE_LIMIT_CACHE_KEY)
+        .await?
+        .filter(|value| (1..=1000).contains(value))
+    {
+        return Ok(value);
+    }
+
+    let value = setting_i32(
+        state,
+        ORDER_QUERY_RATE_LIMIT_PER_MINUTE_KEY,
+        DEFAULT_ORDER_QUERY_RATE_LIMIT_PER_MINUTE,
+    )
+    .await?;
+    let value = if (1..=1000).contains(&value) {
+        value
+    } else {
+        DEFAULT_ORDER_QUERY_RATE_LIMIT_PER_MINUTE
+    };
+    state
+        .redis
+        .set(
+            ORDER_QUERY_RATE_LIMIT_CACHE_KEY,
+            &value,
+            Some(StdDuration::from_secs(60)),
+        )
+        .await?;
+    Ok(value)
 }
 
 async fn validate_resource_storage_channel(

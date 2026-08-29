@@ -1,10 +1,12 @@
 use crate::apis::auth_middleware::Claims;
 use crate::apis::auth_middleware::optional_claims;
 use crate::apis::distribution_handler::{handle_commission_refund, new_commission_active_model};
-use crate::apis::email_verification_handler::normalize_email;
+use crate::apis::email_verification_handler::{normalize_email, token_hash};
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
 use crate::apis::reg_codes_handler::{CodeType, RegCodeStatus, revoke_reg_code_for_order};
-use crate::apis::system_settings_handler::get_distribution_settings;
+use crate::apis::system_settings_handler::{
+    get_distribution_settings, get_order_query_rate_limit_per_minute,
+};
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
 use crate::core::resource_service::{ResourceUpload, download_resource, upload_resource};
@@ -25,9 +27,11 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, EntityTrait,
     IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
     Statement, TransactionTrait,
+    sea_query::{Expr, ExprTrait, Func},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::time::Duration as StdDuration;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -45,6 +49,7 @@ const REFUND_STATUS_SUCCEEDED: i16 = 1;
 const MAX_REFUND_ATTACHMENT_SIZE: u64 = 5 * 1024 * 1024;
 const MAX_TEST_ORDER_QUANTITY: u32 = 1000;
 const CHINA_UTC_OFFSET_SECONDS: i32 = 8 * 60 * 60;
+const ORDER_QUERY_RATE_WINDOW_SECONDS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i16)]
@@ -338,6 +343,21 @@ pub struct ListOrdersParams {
     pub app_id: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PublicOrderLookupParams {
+    #[serde(rename = "type")]
+    pub lookup_type: PublicOrderLookupType,
+    pub value: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicOrderLookupType {
+    OrderNo,
+    BuyerEmail,
+    RegCode,
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct ConfirmOrderRefundReq {
     #[validate(length(min = 1, max = 255))]
@@ -402,6 +422,7 @@ pub struct PublicOrderInfo {
     pub provider: String,
     pub provider_trade_no: Option<String>,
     pub reg_code: Option<String>,
+    pub buyer_email: Option<String>,
     pub paid_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
     pub updated_at: chrono::DateTime<chrono::FixedOffset>,
@@ -422,6 +443,51 @@ impl From<OrderInfo> for PublicOrderInfo {
             provider: order.provider,
             provider_trade_no: order.provider_trade_no,
             reg_code: order.reg_code,
+            buyer_email: order.buyer_email,
+            paid_at: order.paid_at,
+            created_at: order.created_at,
+            updated_at: order.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PublicOrderLookupInfo {
+    pub id: i32,
+    pub order_no: String,
+    pub plan_id: i32,
+    pub plan_name: Option<String>,
+    pub app_id: i32,
+    pub app_name: Option<String>,
+    pub amount_cents: i32,
+    pub pay_type: String,
+    pub status: OrderStatus,
+    pub provider: String,
+    pub provider_trade_no: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reg_code: Option<String>,
+    pub buyer_email: Option<String>,
+    pub paid_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+    pub updated_at: chrono::DateTime<chrono::FixedOffset>,
+}
+
+impl From<OrderInfo> for PublicOrderLookupInfo {
+    fn from(order: OrderInfo) -> Self {
+        Self {
+            id: order.id,
+            order_no: order.order_no,
+            plan_id: order.plan_id,
+            plan_name: order.plan_name,
+            app_id: order.app_id,
+            app_name: order.app_name,
+            amount_cents: order.amount_cents,
+            pay_type: order.pay_type,
+            status: order.status,
+            provider: order.provider,
+            provider_trade_no: order.provider_trade_no,
+            reg_code: order.reg_code,
+            buyer_email: order.buyer_email,
             paid_at: order.paid_at,
             created_at: order.created_at,
             updated_at: order.updated_at,
@@ -1219,6 +1285,95 @@ pub async fn get_order(
     let order = get_order_by_no_impl(state, &order_no).await?;
     let order = sync_pending_order_from_provider(state, order).await?;
     Ok(ApiResponse::success(PublicOrderInfo::from(order)))
+}
+
+#[handler]
+pub async fn lookup_public_orders(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<Vec<PublicOrderLookupInfo>>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    enforce_public_order_query_rate_limit(state, req).await?;
+    let params = req.parse_queries::<PublicOrderLookupParams>()?;
+    let value = params.value.trim();
+    if value.is_empty() {
+        return Err(AppError::validation("order lookup value cannot be empty"));
+    }
+
+    let mut query = orders::Entity::find()
+        .find_also_related(license_plans::Entity)
+        .find_also_related(apps::Entity)
+        .order_by_desc(orders::Column::CreatedAt)
+        .limit(20);
+
+    let include_reg_code = public_order_lookup_includes_reg_code(&params.lookup_type);
+    query = match params.lookup_type {
+        PublicOrderLookupType::OrderNo => {
+            query.filter(orders::Column::OrderNo.eq(value.to_ascii_uppercase()))
+        }
+        PublicOrderLookupType::BuyerEmail => {
+            let email = normalize_email(value)?;
+            query.filter(Func::lower(Expr::col(orders::Column::BuyerEmail)).eq(email))
+        }
+        PublicOrderLookupType::RegCode => query
+            .join(
+                sea_orm::JoinType::InnerJoin,
+                orders::Relation::RegCodes.def(),
+            )
+            .filter(reg_codes::Column::Code.eq(value.to_ascii_uppercase())),
+    };
+
+    let rows = query.all(&state.db).await?;
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        let order = if include_reg_code {
+            build_order_info(state, row).await?
+        } else {
+            OrderInfo::from(row)
+        };
+        result.push(PublicOrderLookupInfo::from(order));
+    }
+    Ok(ApiResponse::success(result))
+}
+
+async fn enforce_public_order_query_rate_limit(
+    state: &AppState,
+    req: &Request,
+) -> Result<(), AppError> {
+    let max = i64::from(get_order_query_rate_limit_per_minute(state).await?);
+    let ip = req
+        .remote_addr()
+        .as_ipv4()
+        .map(|addr| addr.ip().to_string())
+        .or_else(|| {
+            req.remote_addr()
+                .as_ipv6()
+                .map(|addr| addr.ip().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let key = format!("orders:public-query:ip:1m:{}", token_hash(&ip));
+    let count = state
+        .redis
+        .increment_counter(
+            &key,
+            StdDuration::from_secs(ORDER_QUERY_RATE_WINDOW_SECONDS),
+        )
+        .await?;
+    validate_public_order_query_rate_count(count, max)
+}
+
+fn validate_public_order_query_rate_count(count: i64, max: i64) -> Result<(), AppError> {
+    if count > max {
+        return Err(AppError::business_logic(
+            "ORDER_QUERY_RATE_LIMITED",
+            "订单查询过于频繁，请1分钟后重试",
+        ));
+    }
+    Ok(())
+}
+
+fn public_order_lookup_includes_reg_code(lookup_type: &PublicOrderLookupType) -> bool {
+    !matches!(lookup_type, PublicOrderLookupType::BuyerEmail)
 }
 
 #[handler]
@@ -2454,6 +2609,59 @@ mod tests {
         assert_eq!(current_start.day(), 1);
         assert_eq!(current_end, now + Duration::seconds(1));
         assert!(test_order_month_range("2026-09", now).is_err());
+    }
+
+    #[test]
+    fn public_order_lookup_omits_empty_registration_code() {
+        let now = FixedOffset::east_opt(CHINA_UTC_OFFSET_SECONDS)
+            .unwrap()
+            .with_ymd_and_hms(2026, 8, 29, 12, 0, 0)
+            .unwrap();
+        let value = serde_json::to_value(PublicOrderLookupInfo {
+            id: 1,
+            order_no: "LH-ORDER".to_string(),
+            plan_id: 2,
+            plan_name: Some("Plan".to_string()),
+            app_id: 3,
+            app_name: Some("App".to_string()),
+            amount_cents: 100,
+            pay_type: "wechat_native".to_string(),
+            status: OrderStatus::Delivered,
+            provider: PROVIDER_WECHAT.to_string(),
+            provider_trade_no: Some("WX-ORDER".to_string()),
+            reg_code: None,
+            buyer_email: Some("buyer@example.com".to_string()),
+            paid_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+
+        assert!(value.get("reg_code").is_none());
+        assert!(value.get("reg_code_id").is_none());
+    }
+
+    #[test]
+    fn public_order_query_rate_limit_allows_configured_count() {
+        assert!(validate_public_order_query_rate_count(1, 5).is_ok());
+        assert!(validate_public_order_query_rate_count(5, 5).is_ok());
+        assert!(matches!(
+            validate_public_order_query_rate_count(6, 5),
+            Err(AppError::BusinessLogic { code, .. }) if code == "ORDER_QUERY_RATE_LIMITED"
+        ));
+    }
+
+    #[test]
+    fn public_order_lookup_only_hides_code_for_email() {
+        assert!(public_order_lookup_includes_reg_code(
+            &PublicOrderLookupType::OrderNo
+        ));
+        assert!(!public_order_lookup_includes_reg_code(
+            &PublicOrderLookupType::BuyerEmail
+        ));
+        assert!(public_order_lookup_includes_reg_code(
+            &PublicOrderLookupType::RegCode
+        ));
     }
 
     #[test]

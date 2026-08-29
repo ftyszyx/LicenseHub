@@ -2,6 +2,7 @@ export interface SiteSettings {
   storefront_title: string
   registration_enabled: boolean
   resource_storage_channel_id: number
+  order_query_rate_limit_per_minute: number
   distribution: DistributionSettings
   license_signing: LicenseSigningInfo
   email?: EmailSettings | null
@@ -38,6 +39,7 @@ export interface SaveSystemSettingsReq {
   storefront_title: string
   registration_enabled: boolean
   resource_storage_channel_id: number
+  order_query_rate_limit_per_minute: number
   distribution_enabled: boolean
   distribution_referrer_binding_enabled: boolean
   distribution_default_rate_bps: number
