@@ -38,6 +38,7 @@ export interface CommissionInfo {
   id: number
   order_id: number
   order_no: string
+  order_time?: string | null
   user_id: number
   username?: string | null
   order_amount_cents: number

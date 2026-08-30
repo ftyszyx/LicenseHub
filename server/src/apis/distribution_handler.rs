@@ -64,6 +64,7 @@ pub struct CommissionInfo {
     pub id: i64,
     pub order_id: i32,
     pub order_no: String,
+    pub order_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub user_id: i32,
     pub username: Option<String>,
     pub order_amount_cents: i32,
@@ -492,23 +493,30 @@ async fn list_commissions(
     let rows = paginator.fetch_page(page - 1).await?;
     let list = rows
         .into_iter()
-        .map(|(commission, order, user)| CommissionInfo {
-            id: commission.id,
-            order_id: commission.order_id,
-            order_no: order.map(|value| value.order_no).unwrap_or_default(),
-            user_id: commission.user_id,
-            username: user.map(|value| value.username),
-            order_amount_cents: commission.order_amount_cents,
-            commission_rate_bps: commission.commission_rate_bps,
-            commission_amount_cents: commission.commission_amount_cents,
-            available_amount_cents: raw_available_amount(&commission),
-            locked_amount_cents: commission.locked_amount_cents,
-            settled_amount_cents: commission.settled_amount_cents,
-            cancelled_amount_cents: commission.cancelled_amount_cents,
-            adjustment_amount_cents: commission.adjustment_amount_cents,
-            status: commission.status,
-            available_at: commission.available_at,
-            created_at: commission.created_at,
+        .map(|(commission, order, user)| {
+            let (order_no, order_time) = match order {
+                Some(order) => (order.order_no, order.paid_at.or(Some(order.created_at))),
+                None => (String::new(), None),
+            };
+            CommissionInfo {
+                id: commission.id,
+                order_id: commission.order_id,
+                order_no,
+                order_time,
+                user_id: commission.user_id,
+                username: user.map(|value| value.username),
+                order_amount_cents: commission.order_amount_cents,
+                commission_rate_bps: commission.commission_rate_bps,
+                commission_amount_cents: commission.commission_amount_cents,
+                available_amount_cents: raw_available_amount(&commission),
+                locked_amount_cents: commission.locked_amount_cents,
+                settled_amount_cents: commission.settled_amount_cents,
+                cancelled_amount_cents: commission.cancelled_amount_cents,
+                adjustment_amount_cents: commission.adjustment_amount_cents,
+                status: commission.status,
+                available_at: commission.available_at,
+                created_at: commission.created_at,
+            }
         })
         .collect();
     Ok(PagingResponse { list, total, page })

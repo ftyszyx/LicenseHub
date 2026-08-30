@@ -15,6 +15,7 @@
             <el-table-column prop="id" label="ID" width="90" />
             <el-table-column prop="username" label="推广用户" min-width="140" />
             <el-table-column prop="order_no" label="订单号" min-width="190" />
+            <el-table-column label="订单时间" min-width="180"><template #default="{ row }">{{ formatTime(row.order_time) }}</template></el-table-column>
             <el-table-column label="订单金额" width="110"><template #default="{ row }">¥{{ money(row.order_amount_cents) }}</template></el-table-column>
             <el-table-column label="总佣金" width="110"><template #default="{ row }">¥{{ money(row.commission_amount_cents) }}</template></el-table-column>
             <el-table-column label="可提现" width="110"><template #default="{ row }">¥{{ money(row.available_amount_cents) }}</template></el-table-column>
