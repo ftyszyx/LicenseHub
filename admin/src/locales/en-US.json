@@ -1,7 +1,8 @@
 {
   "api_errors": {
     "REG_CODE_DEVICE_LIMIT_REACHED": "This activation code has reached its device limit",
-    "ORDER_QUERY_RATE_LIMITED": "Too many queries. Please try again in one minute."
+    "ORDER_QUERY_RATE_LIMITED": "Too many queries. Please try again in one minute.",
+    "LOGIN_RATE_LIMITED": "Too many failed login attempts. Please try again in one minute."
   },
   "products_page": {
     "title": "Our Products",
@@ -147,7 +148,23 @@
     "permissions": "Permissions",
     "reg_test": "API Test",
     "use_records": "Use Records",
-    "system_settings": "System Settings"
+    "system_settings": "System Settings",
+    "system_logs": "System Logs"
+  },
+  "system_logs": {
+    "title": "System Logs",
+    "date": "Log date",
+    "all_levels": "All",
+    "info": "Info",
+    "warning": "Warning",
+    "error": "Error",
+    "keyword": "Search module or log message",
+    "time": "Time",
+    "level": "Level",
+    "target": "Module",
+    "message": "Message",
+    "details": "Log details",
+    "empty_dates": "No log files"
   },
   "users": {
     "title": "User Management",

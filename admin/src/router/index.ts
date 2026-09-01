@@ -14,6 +14,7 @@ import PlansAdminView from '@/views/admin/PlansAdminView.vue'
 import OrdersAdminView from '@/views/admin/OrdersAdminView.vue'
 import PaymentSettingsAdminView from '@/views/admin/PaymentSettingsAdminView.vue'
 import SystemSettingsAdminView from '@/views/admin/SystemSettingsAdminView.vue'
+import SystemLogsAdminView from '@/views/admin/SystemLogsAdminView.vue'
 import StorageChannelsAdminView from '@/views/admin/StorageChannelsAdminView.vue'
 import ResourcesAdminView from '@/views/admin/ResourcesAdminView.vue'
 import PayResultView from '@/views/PayResultView.vue'
@@ -168,6 +169,12 @@ const router = createRouter({
                     path: RoutePath.AdminSystemSettings,
                     name: RouteName.AdminSystemSettings,
                     component: SystemSettingsAdminView
+                },
+                {
+                    path: RoutePath.AdminSystemLogs,
+                    name: RouteName.AdminSystemLogs,
+                    meta: { permission: 'system_logs' },
+                    component: SystemLogsAdminView
                 },
                 {
                     path: RoutePath.AdminDevices,

@@ -30,6 +30,20 @@ pub async fn log_response_body(
         .unwrap_or("")
         .to_string();
 
+    if omits_body_logging(&path) {
+        tracing::info!(target: "app_server::request", %method, %path, query = "<omitted>", content_type = %req_content_type, body = "<omitted: system log query>");
+        ctrl.call_next(req, depot, res).await;
+        let status = res.status_code.map(|s| s.as_u16()).unwrap_or(0);
+        let content_type = res
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        tracing::info!(target: "app_server::response", %method, %path, %status, %content_type, body = "<omitted: system log response>");
+        return;
+    }
+
     if is_json_content_type(&req_content_type) {
         let content_length = req
             .headers()
@@ -154,6 +168,10 @@ fn is_text_content_type(content_type: &str) -> bool {
     mime.starts_with("text/") || mime == "application/json" || mime.ends_with("+json")
 }
 
+fn omits_body_logging(path: &str) -> bool {
+    path == "/api/admin/system-logs" || path.starts_with("/api/admin/system-logs/")
+}
+
 fn redact_json(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -259,5 +277,11 @@ mod tests {
             "multipart/form-data; boundary=proof-boundary"
         ));
         assert!(is_text_content_type("application/problem+json"));
+    }
+
+    #[test]
+    fn system_log_api_does_not_log_its_response_body() {
+        assert!(omits_body_logging("/api/admin/system-logs"));
+        assert!(!omits_body_logging("/api/admin/system-settings"));
     }
 }

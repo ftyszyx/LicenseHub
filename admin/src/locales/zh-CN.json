@@ -4,7 +4,8 @@
   },
   "api_errors": {
     "REG_CODE_DEVICE_LIMIT_REACHED": "该激活码绑定设备数量已达上限",
-    "ORDER_QUERY_RATE_LIMITED": "查询过于频繁，请1分钟后重试"
+    "ORDER_QUERY_RATE_LIMITED": "查询过于频繁，请1分钟后重试",
+    "LOGIN_RATE_LIMITED": "登录失败次数过多，请1分钟后重试"
   },
   "common": {
     "language": "语言",
@@ -75,7 +76,23 @@
     "permissions": "权限",
     "reg_test": "接口测试",
     "use_records": "使用记录",
-    "system_settings": "系统设置"
+    "system_settings": "系统设置",
+    "system_logs": "系统日志"
+  },
+  "system_logs": {
+    "title": "系统日志",
+    "date": "日志日期",
+    "all_levels": "全部",
+    "info": "信息",
+    "warning": "警告",
+    "error": "错误",
+    "keyword": "搜索模块或日志内容",
+    "time": "时间",
+    "level": "级别",
+    "target": "模块",
+    "message": "日志内容",
+    "details": "日志详情",
+    "empty_dates": "暂无日志文件"
   },
   "dashboard": {
     "title": "仪表盘",

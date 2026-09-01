@@ -19,7 +19,12 @@ use sea_orm::{
     QueryFilter, QuerySelect, Set, Statement, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Duration as StdDuration;
 use tracing::info;
+
+const LOGIN_FAILURE_LIMIT: i64 = 3;
+const LOGIN_FAILURE_WINDOW_SECONDS: u64 = 60;
+const DUMMY_PASSWORD_HASH: &str = "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
 #[derive(Deserialize, ToSchema)]
 pub struct AuthPayload {
@@ -211,20 +216,26 @@ fn validate_password(value: &str) -> Result<(), AppError> {
 pub async fn login(
     payload: JsonBody<AuthPayload>,
     depot: &mut Depot,
+    req: &mut Request,
 ) -> Result<ApiResponse<AuthResponse>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
+    let rate_limit_key = login_failure_rate_limit_key(req);
+    ensure_login_not_rate_limited(state, &rate_limit_key).await?;
 
     let user = users::Entity::find()
         .filter(users::Column::Username.eq(&payload.username))
         .one(&state.db)
         .await?;
-    let user = user.ok_or_else(|| AppError::not_found("user", None))?;
-
-    let is_valid = verify(&payload.password, &user.password)
-        .map_err(|_| AppError::auth_failed("User or password error"))?;
+    let password_hash = user
+        .as_ref()
+        .map(|user| user.password.as_str())
+        .unwrap_or(DUMMY_PASSWORD_HASH);
+    let is_valid = verify(&payload.password, password_hash).unwrap_or(false) && user.is_some();
     if !is_valid {
+        record_login_failure(state, &rate_limit_key).await?;
         return Err(AppError::auth_failed("User or password error"));
     }
+    let user = user.expect("user exists when password validation succeeds");
 
     let role_ids: Vec<i32> = user_roles::Entity::find()
         .filter(user_roles::Column::UserId.eq(user.id))
@@ -238,6 +249,50 @@ pub async fn login(
     let token = create_jwt(user.id, role_ids, &state.config.jwt)
         .map_err(|_| AppError::auth_failed("Token creation failed"))?;
     Ok(ApiResponse::success(AuthResponse { token }))
+}
+
+fn login_failure_rate_limit_key(req: &Request) -> String {
+    let ip = req
+        .remote_addr()
+        .as_ipv4()
+        .map(|addr| addr.ip().to_string())
+        .or_else(|| {
+            req.remote_addr()
+                .as_ipv6()
+                .map(|addr| addr.ip().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("auth:login-failures:ip:1m:{}", token_hash(&ip))
+}
+
+async fn ensure_login_not_rate_limited(state: &AppState, key: &str) -> Result<(), AppError> {
+    let count = state.redis.get::<i64>(key).await?.unwrap_or_default();
+    validate_login_failure_count(count)
+}
+
+async fn record_login_failure(state: &AppState, key: &str) -> Result<(), AppError> {
+    let count = state
+        .redis
+        .increment_counter(key, StdDuration::from_secs(LOGIN_FAILURE_WINDOW_SECONDS))
+        .await?;
+    if count > LOGIN_FAILURE_LIMIT {
+        return login_rate_limited_error();
+    }
+    Ok(())
+}
+
+fn validate_login_failure_count(count: i64) -> Result<(), AppError> {
+    if count >= LOGIN_FAILURE_LIMIT {
+        return login_rate_limited_error();
+    }
+    Ok(())
+}
+
+fn login_rate_limited_error() -> Result<(), AppError> {
+    Err(AppError::business_logic(
+        "LOGIN_RATE_LIMITED",
+        "登录失败次数过多，请1分钟后重试",
+    ))
 }
 
 #[handler]
@@ -280,4 +335,24 @@ pub async fn change_password(
     active.updated_at = Set(Utc::now().fixed_offset());
     let _ = active.update(&state.db).await?;
     Ok(ApiResponse::success(true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_failure_limit_blocks_after_three_failures() {
+        assert!(validate_login_failure_count(0).is_ok());
+        assert!(validate_login_failure_count(2).is_ok());
+        assert!(matches!(
+            validate_login_failure_count(3),
+            Err(AppError::BusinessLogic { code, .. }) if code == "LOGIN_RATE_LIMITED"
+        ));
+    }
+
+    #[test]
+    fn dummy_password_hash_is_valid_bcrypt() {
+        assert!(verify("not-the-dummy-password", DUMMY_PASSWORD_HASH).is_ok());
+    }
 }

@@ -70,6 +70,7 @@ const baseMenuItems: AdminMenuItem[] = [
       { label: "menu.permissions", icon: "Lock", path: RoutePath.AdminPermissions },
       //i18n-key: menu.system_settings
       { label: "menu.system_settings", icon: "Setting", path: RoutePath.AdminSystemSettings },
+      { label: "menu.system_logs", icon: "Document", path: RoutePath.AdminSystemLogs },
       //i18n-key: menu.storage_channels
       { label: "menu.storage_channels", icon: "UploadFilled", path: RoutePath.AdminStorageChannels },
       { label: "menu.resources", icon: "Picture", path: RoutePath.AdminResources },

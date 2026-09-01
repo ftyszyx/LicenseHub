@@ -344,6 +344,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("system_settings", "UPDATE"))
                 .post(apis::system_settings_handler::send_test_email),
         )
+        .push(
+            Router::with_path("system-logs")
+                .hoop(RequirePerm::new("system_logs", "READ"))
+                .get(apis::system_log_handler::list_system_logs),
+        )
         //reg_codes
         .push(
             Router::with_path("reg_codes")

@@ -8,6 +8,9 @@ use std::time::Duration;
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{fmt::time::FormatTime, layer::SubscriberExt, util::SubscriberInitExt};
 
+pub const LOG_DIRECTORY: &str = "logs";
+pub const LOG_FILE_PREFIX: &str = "app.log";
+
 struct East8Timer;
 
 #[derive(Clone)]
@@ -68,7 +71,7 @@ pub async fn init_db(config: &DatabaseConfig) -> Result<DatabaseConnection, DbEr
 
 pub fn init_log() -> WorkerGuard {
     // 同时输出到文件和 stdout，并保留 guard 确保文件日志 flush
-    let file_appender = rolling::daily("logs", "app.log");
+    let file_appender = rolling::daily(LOG_DIRECTORY, LOG_FILE_PREFIX);
     let (non_blocking_appender, guard) = tracing_appender::non_blocking(file_appender);
     let env_filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());

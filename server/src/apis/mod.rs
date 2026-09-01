@@ -12,6 +12,7 @@ pub mod permission_handler;
 pub mod reg_codes_handler;
 pub mod resource_handler;
 pub mod role_handler;
+pub mod system_log_handler;
 pub mod system_settings_handler;
 pub mod use_record_handler;
 pub mod user_handler;
