@@ -419,7 +419,8 @@ struct WechatTransaction {
     out_trade_no: String,
     #[serde(default)]
     transaction_id: Option<String>,
-    trade_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trade_type: Option<String>,
     trade_state: String,
     amount: WechatTransactionAmount,
 }
@@ -511,5 +512,26 @@ mod tests {
                 .to_string();
 
         assert!(validate_wechatpay_timestamp(&timestamp).is_err());
+    }
+
+    #[test]
+    fn parses_pending_order_query_without_trade_type() {
+        let transaction: WechatTransaction = serde_json::from_value(json!({
+            "appid": "wx-test",
+            "mchid": "1900000001",
+            "out_trade_no": "LH202609020001",
+            "trade_state": "NOTPAY",
+            "amount": {
+                "total": 700,
+                "currency": "CNY"
+            }
+        }))
+        .expect("trade_type is optional for a pending order query");
+
+        assert_eq!(transaction.trade_type, None);
+        assert_eq!(
+            wechat_payment_status(&transaction.trade_state),
+            PaymentStatus::Pending
+        );
     }
 }
