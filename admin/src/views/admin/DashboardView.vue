@@ -41,6 +41,7 @@
               />
             </el-select>
             <el-radio-group v-model="groupBy" size="small">
+              <el-radio-button value="hour">{{ $t('dashboard.by_hour') }}</el-radio-button>
               <el-radio-button value="day">{{ $t('dashboard.by_day') }}</el-radio-button>
               <el-radio-button value="month">{{ $t('dashboard.by_month') }}</el-radio-button>
               <el-radio-button value="year">{{ $t('dashboard.by_year') }}</el-radio-button>
@@ -139,9 +140,11 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { BarChart, type BarSeriesOption, LineChart, type LineSeriesOption } from 'echarts/charts'
 import {
+  DataZoomComponent,
   GridComponent,
   LegendComponent,
   TooltipComponent,
+  type DataZoomComponentOption,
   type GridComponentOption,
   type LegendComponentOption,
   type TooltipComponentOption,
@@ -163,12 +166,21 @@ type TrendChartType = 'bar' | 'line'
 type TrendChartOption = ComposeOption<
   BarSeriesOption
   | LineSeriesOption
+  | DataZoomComponentOption
   | GridComponentOption
   | LegendComponentOption
   | TooltipComponentOption
 >
 
-use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+use([
+  BarChart,
+  LineChart,
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  CanvasRenderer,
+])
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -198,7 +210,7 @@ const stats = reactive<DashboardStats>({
 
 const trendRangeLabel = computed(() => {
   const [start, end] = selectedRange.value
-  const options: Intl.DateTimeFormatOptions = groupBy.value === 'day'
+  const options: Intl.DateTimeFormatOptions = groupBy.value === 'hour' || groupBy.value === 'day'
     ? { year: 'numeric', month: '2-digit', day: '2-digit' }
     : groupBy.value === 'month'
       ? { year: 'numeric', month: '2-digit' }
@@ -211,13 +223,13 @@ const trendRangeLabel = computed(() => {
 })
 
 const trendRangePickerType = computed(() => {
-  if (groupBy.value === 'day') return 'daterange'
+  if (groupBy.value === 'hour' || groupBy.value === 'day') return 'daterange'
   if (groupBy.value === 'month') return 'monthrange'
   return 'yearrange'
 })
 
 const trendRangePickerFormat = computed(() => {
-  if (groupBy.value === 'day') return 'YYYY-MM-DD'
+  if (groupBy.value === 'hour' || groupBy.value === 'day') return 'YYYY-MM-DD'
   if (groupBy.value === 'month') return 'YYYY-MM'
   return 'YYYY'
 })
@@ -304,6 +316,10 @@ function formatPrice(cents: number) {
 
 function defaultTrendRange(value: DashboardTrendGroupBy): [Date, Date] {
   const now = new Date()
+  if (value === 'hour') {
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return [today, today]
+  }
   if (value === 'year') {
     return [
       new Date(now.getFullYear() - 4, 0, 1),
@@ -353,7 +369,29 @@ function renderTrendChart() {
       color: ['#2563eb', '#16a34a'],
       tooltip: { trigger: 'axis' },
       legend: { top: 0, left: 0 },
-      grid: { top: 52, right: 62, bottom: 30, left: 70, containLabel: false },
+      grid: { top: 52, right: 62, bottom: 68, left: 70, containLabel: false },
+      dataZoom: [
+        {
+          type: 'inside',
+          xAxisIndex: 0,
+          filterMode: 'none',
+          zoomOnMouseWheel: true,
+          moveOnMouseWheel: false,
+          moveOnMouseMove: true,
+          preventDefaultMouseMove: true,
+        },
+        {
+          type: 'slider',
+          xAxisIndex: 0,
+          filterMode: 'none',
+          bottom: 8,
+          height: 22,
+          showDetail: false,
+          borderColor: '#cbd5e1',
+          fillerColor: 'rgba(37, 99, 235, 0.14)',
+          handleStyle: { color: '#2563eb', borderColor: '#2563eb' },
+        },
+      ],
       xAxis: {
         type: 'category',
         boundaryGap: chartType.value === 'bar',
@@ -361,7 +399,9 @@ function renderTrendChart() {
         axisTick: { alignWithLabel: true },
         axisLabel: {
           hideOverlap: true,
-          formatter: (value: string) => groupBy.value === 'day' ? value.slice(5) : value,
+          formatter: (value: string) => groupBy.value === 'hour' || groupBy.value === 'day'
+            ? value.slice(5)
+            : value,
         },
       },
       yAxis: [

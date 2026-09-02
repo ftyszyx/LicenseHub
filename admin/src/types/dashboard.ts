@@ -22,7 +22,7 @@ export interface DashboardStats {
   recent_orders: DashboardRecentOrder[]
 }
 
-export type DashboardTrendGroupBy = 'day' | 'month' | 'year'
+export type DashboardTrendGroupBy = 'hour' | 'day' | 'month' | 'year'
 
 export interface DashboardTrendParams {
   group_by: DashboardTrendGroupBy

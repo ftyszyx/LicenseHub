@@ -369,6 +369,7 @@
     "last_30_days": "Last 30 days, delivered orders only",
     "last_12_months": "Last 12 months, delivered orders only",
     "all_apps": "All apps",
+    "by_hour": "Hourly",
     "by_day": "Daily",
     "by_month": "Monthly",
     "by_year": "Yearly",

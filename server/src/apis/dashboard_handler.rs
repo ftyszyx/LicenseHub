@@ -10,8 +10,10 @@ use sea_orm::{ConnectionTrait, EntityTrait, QueryOrder, QuerySelect, Statement};
 use serde::{Deserialize, Serialize};
 
 const DAILY_PERIODS: i64 = 30;
+const HOURLY_PERIODS: i64 = 24;
 const MONTHLY_PERIODS: u32 = 12;
 const YEARLY_PERIODS: u32 = 5;
+const MAX_HOURLY_DAYS: i64 = 366;
 const MAX_DAILY_PERIODS: i64 = 3660;
 const MAX_MONTHLY_PERIODS: i32 = 600;
 const MAX_YEARLY_PERIODS: i32 = 100;
@@ -70,6 +72,7 @@ pub struct DashboardTrendApp {
 
 #[derive(Debug, Clone, Copy)]
 enum TrendGroupBy {
+    Hour,
     Day,
     Month,
     Year,
@@ -78,10 +81,13 @@ enum TrendGroupBy {
 impl TrendGroupBy {
     fn parse(value: Option<&str>) -> Result<Self, AppError> {
         match value.unwrap_or("day") {
+            "hour" => Ok(Self::Hour),
             "day" => Ok(Self::Day),
             "month" => Ok(Self::Month),
             "year" => Ok(Self::Year),
-            _ => Err(AppError::validation("group_by must be day, month, or year")),
+            _ => Err(AppError::validation(
+                "group_by must be hour, day, month, or year",
+            )),
         }
     }
 }
@@ -185,11 +191,27 @@ pub async fn get_dashboard_trend_impl(
         .last()
         .ok_or_else(|| AppError::validation("trend period is empty"))?;
     let (query_start, query_end) = match group_by {
+        TrendGroupBy::Hour => (start.clone(), end.clone()),
         TrendGroupBy::Day => (start.clone(), end.clone()),
         TrendGroupBy::Month => (format!("{start}-01"), format!("{end}-01")),
         TrendGroupBy::Year => (format!("{start}-01-01"), format!("{end}-01-01")),
     };
     let sql = match group_by {
+        TrendGroupBy::Hour => {
+            r#"
+            SELECT
+                TO_CHAR(DATE_TRUNC('hour', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at"))), 'YYYY-MM-DD HH24:00') AS period,
+                COALESCE(SUM("amount_cents"), 0)::BIGINT AS revenue_cents,
+                COUNT(*)::BIGINT AS order_count
+            FROM "orders"
+            WHERE "status" = $1
+              AND TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")) >= $2::TIMESTAMP
+              AND TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")) < $3::TIMESTAMP + INTERVAL '1 hour'
+              AND ($4::INTEGER IS NULL OR "app_id" = $4)
+            GROUP BY period
+            ORDER BY period
+            "#
+        }
         TrendGroupBy::Day => {
             r#"
             SELECT
@@ -306,6 +328,30 @@ fn trend_periods(
     };
 
     match group_by {
+        TrendGroupBy::Hour => {
+            let (start, end) = custom_range.unwrap_or((today, today));
+            let day_count = (end - start).num_days() + 1;
+            if day_count < 1 {
+                return Err(AppError::validation(
+                    "start_date must not be later than end_date",
+                ));
+            }
+            if day_count > MAX_HOURLY_DAYS {
+                return Err(AppError::validation(
+                    "hourly range must not exceed 366 days",
+                ));
+            }
+            let start = start
+                .and_hms_opt(0, 0, 0)
+                .ok_or_else(|| AppError::validation("invalid trend start hour"))?;
+            Ok((0..day_count * HOURLY_PERIODS)
+                .map(|offset| {
+                    (start + Duration::hours(offset))
+                        .format("%Y-%m-%d %H:00")
+                        .to_string()
+                })
+                .collect())
+        }
         TrendGroupBy::Day => {
             let (start, end) =
                 custom_range.unwrap_or_else(|| (today - Duration::days(DAILY_PERIODS - 1), today));
@@ -480,16 +526,21 @@ fn i64_to_u64(value: i64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{NaiveDateTime, Timelike};
 
     #[test]
     fn trend_periods_have_expected_lengths_and_formats() {
+        let hours = trend_periods(TrendGroupBy::Hour, None, None).unwrap();
         let days = trend_periods(TrendGroupBy::Day, None, None).unwrap();
         let months = trend_periods(TrendGroupBy::Month, None, None).unwrap();
         let years = trend_periods(TrendGroupBy::Year, None, None).unwrap();
 
+        assert_eq!(hours.len(), HOURLY_PERIODS as usize);
         assert_eq!(days.len(), DAILY_PERIODS as usize);
         assert_eq!(months.len(), MONTHLY_PERIODS as usize);
         assert_eq!(years.len(), YEARLY_PERIODS as usize);
+        let first_hour = NaiveDateTime::parse_from_str(&hours[0], "%Y-%m-%d %H:%M").unwrap();
+        assert_eq!(first_hour.minute(), 0);
         assert!(NaiveDate::parse_from_str(&days[0], "%Y-%m-%d").is_ok());
         assert_eq!(months[0].len(), 7);
         assert_eq!(years[0].len(), 4);
@@ -497,6 +548,8 @@ mod tests {
 
     #[test]
     fn trend_periods_use_custom_date_ranges() {
+        let hours =
+            trend_periods(TrendGroupBy::Hour, Some("2026-08-01"), Some("2026-08-02")).unwrap();
         let days =
             trend_periods(TrendGroupBy::Day, Some("2026-08-01"), Some("2026-08-03")).unwrap();
         let months =
@@ -504,15 +557,29 @@ mod tests {
         let years =
             trend_periods(TrendGroupBy::Year, Some("2024-08-01"), Some("2026-02-01")).unwrap();
 
+        assert_eq!(hours.len(), 48);
+        assert_eq!(hours.first().map(String::as_str), Some("2026-08-01 00:00"));
+        assert_eq!(hours.last().map(String::as_str), Some("2026-08-02 23:00"));
+        assert_eq!(
+            trend_periods(TrendGroupBy::Hour, Some("2026-01-01"), Some("2027-01-01"))
+                .unwrap()
+                .len(),
+            366 * HOURLY_PERIODS as usize
+        );
         assert_eq!(days, ["2026-08-01", "2026-08-02", "2026-08-03"]);
         assert_eq!(months, ["2026-01", "2026-02", "2026-03"]);
         assert_eq!(years, ["2024", "2025", "2026"]);
         assert!(trend_periods(TrendGroupBy::Day, Some("2026-08-01"), None).is_err());
         assert!(trend_periods(TrendGroupBy::Day, Some("2026-08-03"), Some("2026-08-01")).is_err());
+        assert!(trend_periods(TrendGroupBy::Hour, Some("2026-08-01"), Some("2027-08-02")).is_err());
     }
 
     #[test]
     fn trend_group_by_rejects_unknown_values() {
+        assert!(matches!(
+            TrendGroupBy::parse(Some("hour")),
+            Ok(TrendGroupBy::Hour)
+        ));
         assert!(matches!(
             TrendGroupBy::parse(Some("year")),
             Ok(TrendGroupBy::Year)
