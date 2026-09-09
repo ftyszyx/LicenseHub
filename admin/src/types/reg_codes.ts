@@ -9,6 +9,8 @@ export interface RegCodeModel {
   max_devices: number
   status: RegCodeStatus
   binding_time?: string | null
+  effective_time?: string | null
+  expire_time?: string | null
   code_type: RegCodeType
   total_count?: number | null
   remaining_count?: number | null
@@ -41,6 +43,8 @@ export type ListRegCodesParams = {
   status?: RegCodeStatus
   code_type?: RegCodeType
   device_id?: string
+  sort_by?: 'created_at' | 'expire_time'
+  sort_order?: 'asc' | 'desc'
 } & ListParamsReq
 
 export interface BatchCreateRegCodesReq {

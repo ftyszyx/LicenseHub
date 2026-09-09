@@ -1383,6 +1383,7 @@ async fn test_time_reg_code_binds_up_to_app_device_limit_and_revokes_all_devices
         helpers::unique_name("multi-time-device-1"),
         helpers::unique_name("multi-time-device-2"),
     ];
+    let mut expire_times = Vec::new();
     for device_id in &device_ids {
         let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
             .add_header("content-type", "application/json", true)
@@ -1391,8 +1392,11 @@ async fn test_time_reg_code_binds_up_to_app_device_limit_and_revokes_all_devices
             .await;
         let json = print_response_body_get_json(resp, "bind_multi_time_device").await;
         assert!(json["success"].as_bool().unwrap());
-        assert!(json["data"]["expire_time"].as_i64().unwrap() > chrono::Utc::now().timestamp());
+        let expire_time = json["data"]["expire_time"].as_i64().unwrap();
+        assert!(expire_time > chrono::Utc::now().timestamp());
+        expire_times.push(expire_time);
     }
+    assert_eq!(expire_times[0], expire_times[1]);
 
     let resp = TestClient::post(helpers::get_url("/api/reg/bind"))
         .add_header("content-type", "application/json", true)
@@ -1415,6 +1419,9 @@ async fn test_time_reg_code_binds_up_to_app_device_limit_and_revokes_all_devices
     let json = print_response_body_get_json(resp, "get_multi_time_code").await;
     assert_eq!(json["data"]["bound_device_count"].as_u64(), Some(2));
     assert_eq!(json["data"]["device_ids"].as_array().unwrap().len(), 2);
+    assert!(json["data"]["binding_time"].is_string());
+    assert!(json["data"]["effective_time"].is_string());
+    assert!(json["data"]["expire_time"].is_string());
 
     let resp = TestClient::post(helpers::get_url(&format!(
         "/api/admin/reg_codes/{reg_code_id}/revoke"

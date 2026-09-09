@@ -9,7 +9,7 @@
           <el-select v-model.number="query.app_id" placeholder="App" clearable class="w-48">
             <el-option v-for="opt in appOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
           </el-select>
-          <el-select v-model="query.code_type" placeholder="Type" clearable class="w-36" @change="reload">
+          <el-select v-model="query.code_type" placeholder="Type" clearable class="w-36" @change="handleCodeTypeChange">
             <el-option :label="$t('reg_codes.type_time')" :value="RegCodeType.Time" />
             <el-option :label="$t('reg_codes.type_count')" :value="RegCodeType.Count" />
           </el-select>
@@ -27,7 +27,8 @@
     </el-card>
 
     <el-card class="admin-list-panel" shadow="never">
-      <el-table class="admin-list-table" :data="rows" stripe size="large" height="100%" @selection-change="onSelChange">
+      <el-table ref="tableRef" class="admin-list-table" :data="rows" stripe size="large" height="100%"
+        @selection-change="onSelChange" @sort-change="handleSortChange">
         <el-table-column type="selection" width="50" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column :label="$t('reg_codes.code')" min-width="200">
@@ -48,6 +49,12 @@
           </el-table-column>
           <el-table-column prop="binding_time" :label="$t('reg_codes.binding_time')" width="180">
             <template #default="{ row }">{{ formatTime(row.binding_time) }}</template>
+          </el-table-column>
+          <el-table-column prop="effective_time" :label="$t('reg_codes.effective_time')" width="180">
+            <template #default="{ row }">{{ formatTime(row.effective_time) }}</template>
+          </el-table-column>
+          <el-table-column prop="expire_time" :label="$t('reg_codes.expire_time')" width="180" sortable="custom">
+            <template #default="{ row }">{{ formatTime(row.expire_time) }}</template>
           </el-table-column>
         </template>
         <template v-if="query.code_type === RegCodeType.Count">
@@ -177,6 +184,7 @@ function statusTagType(status: RegCodeStatus) {
 }
 
 const rows = ref<RegCodeModel[]>([])
+const tableRef = ref<{ clearSort: () => void } | null>(null)
 const appOptions = ref<{ id: number, name: string, code_type: RegCodeType }[]>([])
 const page = ref(1)
 const pageSize = ref(20)
@@ -208,10 +216,36 @@ async function reload() {
   total.value = data.total
 }
 function search() { page.value = 1; reload() }
-function resetFilters() { query.code = ''; query.device_id = ''; query.app_id = undefined; query.code_type = RegCodeType.Time; query.status = undefined; page.value = 1; reload() }
+function resetFilters() {
+  query.code = ''
+  query.device_id = ''
+  query.app_id = undefined
+  query.code_type = RegCodeType.Time
+  query.status = undefined
+  clearTimeSort()
+  page.value = 1
+  reload()
+}
 function onSelChange(arr: RegCodeModel[]) { selectedIds.value = arr.map(it => it.id) }
 function handlePageChange(p: number) { page.value = p; reload() }
 function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reload() }
+function clearTimeSort() {
+  query.sort_by = undefined
+  query.sort_order = undefined
+  tableRef.value?.clearSort()
+}
+function handleCodeTypeChange() {
+  clearTimeSort()
+  page.value = 1
+  reload()
+}
+function handleSortChange({ prop, order }: { prop: string, order: 'ascending' | 'descending' | null }) {
+  if (prop !== 'expire_time') return
+  query.sort_by = order ? 'expire_time' : undefined
+  query.sort_order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : undefined
+  page.value = 1
+  reload()
+}
 
 function openEditDialog(row: RegCodeModel) {
   const boundDeviceCount = row.bound_device_count ?? (row.device_id ? 1 : 0)

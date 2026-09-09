@@ -4,6 +4,7 @@
   },
   "api_errors": {
     "REG_CODE_DEVICE_LIMIT_REACHED": "该激活码绑定设备数量已达上限",
+    "REG_CODE_EXPIRED": "该激活码已过期",
     "ORDER_QUERY_RATE_LIMITED": "查询过于频繁，请1分钟后重试",
     "LOGIN_RATE_LIMITED": "登录失败次数过多，请1分钟后重试"
   },
@@ -453,6 +454,8 @@
     "valid_days": "有效天数",
     "total_count": "总次数",
     "binding_time": "绑定时间",
+    "effective_time": "生效时间",
+    "expire_time": "过期时间",
     "status_unused": "未使用",
     "status_issued": "已发放",
     "status_binded": "已绑定",

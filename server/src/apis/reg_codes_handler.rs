@@ -12,9 +12,11 @@ use data_model::{app_devices, apps, reg_code_devices, reg_codes};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::extract::PathParam;
 use salvo_oapi::{ToSchema, endpoint};
+use sea_orm::sea_query::NullOrdering;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    IntoActiveModel, Order, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -181,6 +183,26 @@ pub struct SearchRegCodesParams {
     pub code_type: Option<CodeType>,
     #[serde(default)]
     pub device_id: Option<String>,
+    #[serde(default)]
+    pub sort_by: Option<RegCodeSortBy>,
+    #[serde(default)]
+    pub sort_order: Option<SortOrder>,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RegCodeSortBy {
+    #[default]
+    CreatedAt,
+    ExpireTime,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    Asc,
+    #[default]
+    Desc,
 }
 
 #[derive(Serialize, Deserialize, Debug, Validate, ToSchema)]
@@ -192,6 +214,8 @@ pub struct RegCodeInfo {
     pub max_devices: i32,
     pub status: i16,
     pub binding_time: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub effective_time: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub code_type: CodeType,
     pub total_count: Option<i32>,
     pub remaining_count: Option<i32>,
@@ -224,6 +248,13 @@ impl
         let (reg_code, app, device) = value;
         let device_id_str = device.as_ref().map(|d| d.device_id.clone());
         let device_info = device.as_ref().and_then(|d| d.device_info.clone());
+        let device_expire_time = device.as_ref().and_then(|d| d.expire_time);
+        let expire_time = reg_code.expire_time.or(device_expire_time);
+        let effective_time = reg_code.effective_time.or_else(|| {
+            expire_time.and_then(|value| {
+                value.checked_sub_signed(chrono::Duration::days(reg_code.valid_days as i64))
+            })
+        });
         Ok(Self {
             id: reg_code.id,
             code: reg_code.code,
@@ -232,6 +263,8 @@ impl
             max_devices: reg_code.max_devices,
             status: reg_code.status,
             binding_time: reg_code.binding_time,
+            effective_time,
+            expire_time,
             code_type: CodeType::from(reg_code.code_type),
             total_count: reg_code.total_count,
             remaining_count: reg_code.remaining_count,
@@ -262,6 +295,8 @@ impl TryFrom<reg_codes::Model> for RegCodeInfo {
             max_devices: reg_code.max_devices,
             status: reg_code.status,
             binding_time: reg_code.binding_time,
+            effective_time: reg_code.effective_time,
+            expire_time: reg_code.expire_time,
             code_type: CodeType::from(reg_code.code_type),
             total_count: reg_code.total_count,
             remaining_count: reg_code.remaining_count,
@@ -785,8 +820,23 @@ pub async fn get_list_impl(
 
     let mut query = reg_codes::Entity::find()
         .find_also_related(apps::Entity)
-        .find_also_related(app_devices::Entity)
-        .order_by_desc(reg_codes::Column::CreatedAt);
+        .find_also_related(app_devices::Entity);
+
+    let sort_order = match params.sort_order.unwrap_or_default() {
+        SortOrder::Asc => Order::Asc,
+        SortOrder::Desc => Order::Desc,
+    };
+    query = match params.sort_by.unwrap_or_default() {
+        RegCodeSortBy::CreatedAt => {
+            query.order_by(reg_codes::Column::CreatedAt, sort_order.clone())
+        }
+        RegCodeSortBy::ExpireTime => query.order_by_with_nulls(
+            reg_codes::Column::ExpireTime,
+            sort_order.clone(),
+            NullOrdering::Last,
+        ),
+    };
+    query = query.order_by(reg_codes::Column::Id, sort_order);
 
     if let Some(v) = params.id {
         query = query.filter(reg_codes::Column::Id.eq(v));
@@ -1079,9 +1129,76 @@ async fn require_license_signing_private_key_b64(state: &AppState) -> Result<Str
     Ok(private_key_b64)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RegCodeTimeWindow {
+    binding_time: DateTime<FixedOffset>,
+    effective_time: DateTime<FixedOffset>,
+    expire_time: DateTime<FixedOffset>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TimeEntitlement {
+    window: RegCodeTimeWindow,
+    device_expire_time: DateTime<FixedOffset>,
+}
+
 enum BoundEntitlement {
-    Time(DateTime<FixedOffset>),
+    Time(TimeEntitlement),
     Count(i32),
+}
+
+fn resolve_reg_code_time_window(
+    binding_time: Option<DateTime<FixedOffset>>,
+    effective_time: Option<DateTime<FixedOffset>>,
+    expire_time: Option<DateTime<FixedOffset>>,
+    device_expire_time: Option<DateTime<FixedOffset>>,
+    valid_days: i32,
+    now: DateTime<FixedOffset>,
+) -> Result<RegCodeTimeWindow, AppError> {
+    let valid_duration = chrono::Duration::days(i64::from(valid_days));
+    let checked_add = |value: DateTime<FixedOffset>| {
+        value
+            .checked_add_signed(valid_duration)
+            .ok_or_else(|| AppError::validation("reg code expiration time is out of range"))
+    };
+    let checked_sub = |value: DateTime<FixedOffset>| {
+        value
+            .checked_sub_signed(valid_duration)
+            .ok_or_else(|| AppError::validation("reg code effective time is out of range"))
+    };
+
+    if let Some(expire_time) = expire_time {
+        return Ok(RegCodeTimeWindow {
+            binding_time: binding_time.unwrap_or(now),
+            effective_time: match effective_time {
+                Some(value) => value,
+                None => checked_sub(expire_time)?,
+            },
+            expire_time,
+        });
+    }
+
+    if let Some(binding_time) = binding_time {
+        let expire_time = match device_expire_time {
+            Some(value) => value,
+            None => checked_add(binding_time)?,
+        };
+        return Ok(RegCodeTimeWindow {
+            binding_time,
+            effective_time: match effective_time {
+                Some(value) => value,
+                None => checked_sub(expire_time)?,
+            },
+            expire_time,
+        });
+    }
+
+    let effective_time = device_expire_time.unwrap_or(now).max(now);
+    Ok(RegCodeTimeWindow {
+        binding_time: now,
+        effective_time,
+        expire_time: checked_add(effective_time)?,
+    })
 }
 
 async fn find_device_by_app_and_id_on<C>(
@@ -1215,44 +1332,50 @@ async fn bind_code_level_entitlement(
                     "consume_count is only supported for count reg codes",
                 ));
             }
-            if already_bound {
-                let expire_time = device
-                    .as_ref()
-                    .and_then(|value| value.expire_time)
-                    .unwrap_or(now);
-                if expire_time <= now {
-                    return Err(AppError::Message("device expired".into()));
-                }
-                BoundEntitlement::Time(expire_time)
-            } else {
-                let expire_time = match device.take() {
-                    Some(device_model) => {
-                        let current_expire = device_model.expire_time.unwrap_or(now).max(now);
-                        let expire_time =
-                            current_expire + chrono::Duration::days(reg_code.valid_days as i64);
-                        let mut active_device = device_model.into_active_model();
-                        active_device.expire_time = Set(Some(expire_time));
-                        active_device.updated_at = Set(now);
-                        device = Some(active_device.update(&tx).await?);
-                        expire_time
-                    }
-                    None => {
-                        let expire_time = now + chrono::Duration::days(reg_code.valid_days as i64);
-                        device = Some(
-                            app_devices::ActiveModel {
-                                app_id: Set(app_model.id),
-                                device_id: Set(device_id.to_string()),
-                                expire_time: Set(Some(expire_time)),
-                                ..Default::default()
-                            }
-                            .insert(&tx)
-                            .await?,
-                        );
-                        expire_time
-                    }
-                };
-                BoundEntitlement::Time(expire_time)
+            let current_device_expire_time = device.as_ref().and_then(|value| value.expire_time);
+            let window = resolve_reg_code_time_window(
+                reg_code.binding_time,
+                reg_code.effective_time,
+                reg_code.expire_time,
+                current_device_expire_time,
+                reg_code.valid_days,
+                now,
+            )?;
+            if window.expire_time <= now {
+                return Err(AppError::business_logic(
+                    "REG_CODE_EXPIRED",
+                    "reg code has expired",
+                ));
             }
+
+            let device_expire_time = current_device_expire_time
+                .unwrap_or(window.expire_time)
+                .max(window.expire_time);
+            device = Some(match device.take() {
+                Some(device_model) if device_model.expire_time == Some(device_expire_time) => {
+                    device_model
+                }
+                Some(device_model) => {
+                    let mut active_device = device_model.into_active_model();
+                    active_device.expire_time = Set(Some(device_expire_time));
+                    active_device.updated_at = Set(now);
+                    active_device.update(&tx).await?
+                }
+                None => {
+                    app_devices::ActiveModel {
+                        app_id: Set(app_model.id),
+                        device_id: Set(device_id.to_string()),
+                        expire_time: Set(Some(device_expire_time)),
+                        ..Default::default()
+                    }
+                    .insert(&tx)
+                    .await?
+                }
+            });
+            BoundEntitlement::Time(TimeEntitlement {
+                window,
+                device_expire_time,
+            })
         }
         CodeType::Count => {
             let remaining = reg_code.remaining_count.unwrap_or(0);
@@ -1290,21 +1413,28 @@ async fn bind_code_level_entitlement(
     let had_binding_time = reg_code.binding_time.is_some();
     let had_primary_device = reg_code.device_id.is_some();
     let mut active_reg_code = reg_code.into_active_model();
-    if !had_binding_time {
-        active_reg_code.binding_time = Set(Some(now));
-    }
     active_reg_code.status = Set(i16::from(RegCodeStatus::Binded));
     if !had_primary_device {
         active_reg_code.device_id = Set(Some(device.id));
     }
-    if let BoundEntitlement::Count(remaining) = &entitlement {
-        active_reg_code.remaining_count = Set(Some(*remaining));
+    match &entitlement {
+        BoundEntitlement::Time(entitlement) => {
+            active_reg_code.binding_time = Set(Some(entitlement.window.binding_time));
+            active_reg_code.effective_time = Set(Some(entitlement.window.effective_time));
+            active_reg_code.expire_time = Set(Some(entitlement.window.expire_time));
+        }
+        BoundEntitlement::Count(remaining) => {
+            if !had_binding_time {
+                active_reg_code.binding_time = Set(Some(now));
+            }
+            active_reg_code.remaining_count = Set(Some(*remaining));
+        }
     }
     active_reg_code.updated_at = Set(now);
     active_reg_code.update(&tx).await?;
 
     let entitlement = match entitlement {
-        BoundEntitlement::Time(expire_time) => BoundEntitlement::Time(expire_time),
+        BoundEntitlement::Time(entitlement) => BoundEntitlement::Time(entitlement),
         BoundEntitlement::Count(_) => {
             BoundEntitlement::Count(effective_device_remaining(&tx, &device).await?)
         }
@@ -1341,12 +1471,12 @@ pub async fn bind_code_impl(
     match bind_code_level_entitlement(state, &app_model, &req.device_id, reg_code_model.id, 0)
         .await?
     {
-        BoundEntitlement::Time(expire_time) => time_status_resp(
+        BoundEntitlement::Time(entitlement) => time_status_resp(
             state,
             &private_key_b64,
             &app_model,
             &req.device_id,
-            expire_time,
+            entitlement.device_expire_time,
         ),
         BoundEntitlement::Count(remaining) => count_status_resp(
             state,
@@ -1640,9 +1770,9 @@ pub async fn validate_code_impl(
     )
     .await?
     {
-        BoundEntitlement::Time(expire_time) => Ok(RegCodeValidateResp {
+        BoundEntitlement::Time(entitlement) => Ok(RegCodeValidateResp {
             code_type: CodeType::Time,
-            expire_time: Some(expire_time),
+            expire_time: Some(entitlement.device_expire_time),
             remaining_count: None,
         }),
         BoundEntitlement::Count(remaining_count) => Ok(RegCodeValidateResp {
@@ -1723,5 +1853,54 @@ pub async fn trial_validate(
                 remaining_count: Some(new_remaining),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn timestamp(value: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(value).expect("valid test timestamp")
+    }
+
+    #[test]
+    fn time_code_reuses_its_window_for_later_devices() {
+        let first_binding = timestamp("2026-09-01T00:00:00+08:00");
+        let first_window = resolve_reg_code_time_window(None, None, None, None, 10, first_binding)
+            .expect("initialize first binding");
+        assert_eq!(first_window.binding_time, first_binding);
+        assert_eq!(first_window.effective_time, first_binding);
+        assert_eq!(
+            first_window.expire_time,
+            timestamp("2026-09-11T00:00:00+08:00")
+        );
+
+        let second_window = resolve_reg_code_time_window(
+            Some(first_window.binding_time),
+            Some(first_window.effective_time),
+            Some(first_window.expire_time),
+            None,
+            10,
+            timestamp("2026-09-10T00:00:00+08:00"),
+        )
+        .expect("reuse time window");
+        assert_eq!(second_window, first_window);
+    }
+
+    #[test]
+    fn different_time_codes_are_scheduled_after_current_expiry() {
+        let now = timestamp("2026-09-01T00:00:00+08:00");
+        let current_expire_time = timestamp("2026-09-11T00:00:00+08:00");
+        let renewal_window =
+            resolve_reg_code_time_window(None, None, None, Some(current_expire_time), 10, now)
+                .expect("schedule renewal");
+
+        assert_eq!(renewal_window.binding_time, now);
+        assert_eq!(renewal_window.effective_time, current_expire_time);
+        assert_eq!(
+            renewal_window.expire_time,
+            timestamp("2026-09-21T00:00:00+08:00")
+        );
     }
 }

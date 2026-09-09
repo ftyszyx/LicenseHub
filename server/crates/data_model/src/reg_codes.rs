@@ -15,6 +15,8 @@ pub struct Model {
     pub max_devices: i32,
     pub status: i16,
     pub binding_time: Option<DateTimeWithTimeZone>,
+    pub effective_time: Option<DateTimeWithTimeZone>,
+    pub expire_time: Option<DateTimeWithTimeZone>,
     pub code_type: i16,
     pub total_count: Option<i32>,
     pub remaining_count: Option<i32>,

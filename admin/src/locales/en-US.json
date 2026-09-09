@@ -1,6 +1,7 @@
 {
   "api_errors": {
     "REG_CODE_DEVICE_LIMIT_REACHED": "This activation code has reached its device limit",
+    "REG_CODE_EXPIRED": "This activation code has expired",
     "ORDER_QUERY_RATE_LIMITED": "Too many queries. Please try again in one minute.",
     "LOGIN_RATE_LIMITED": "Too many failed login attempts. Please try again in one minute."
   },
@@ -183,6 +184,8 @@
     "app": "App",
     "valid_days": "Valid days",
     "binding_time": "Binding time",
+    "effective_time": "Effective time",
+    "expire_time": "Expiration time",
     "total_count": "Total count",
     "status": "Status",
     "created": "Created",
