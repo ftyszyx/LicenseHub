@@ -224,6 +224,10 @@ impl PaymentAdapter for AlipayPageAdapter {
             pay_type: PAY_TYPE_ALIPAY.to_string(),
             out_trade_no: get_param(&params, "out_trade_no")?.to_string(),
             provider_trade_no: params.get("trade_no").cloned().and_then(non_empty),
+            provider_buyer_id: params
+                .get("buyer_id")
+                .map(|value| value.trim().to_string())
+                .and_then(non_empty),
             amount_cents: parse_amount_cents(get_param(&params, "total_amount")?)?,
             status,
             raw_payload: json!({

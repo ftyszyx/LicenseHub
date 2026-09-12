@@ -64,6 +64,8 @@ pub struct PaymentNotification {
     pub pay_type: String,
     pub out_trade_no: String,
     pub provider_trade_no: Option<String>,
+    #[serde(default)]
+    pub provider_buyer_id: Option<String>,
     pub amount_cents: i32,
     pub status: PaymentStatus,
     pub raw_payload: serde_json::Value,

@@ -169,7 +169,13 @@
   },
   "users": {
     "title": "User Management",
-    "placeholder": "User management page to be implemented"
+    "placeholder": "User management page to be implemented",
+    "reset_password": "Reset password",
+    "reset_referral_code": "Reset referral code",
+    "password_required": "Please enter a password",
+    "password_length": "Password must be 8 to 72 characters",
+    "password_mismatch": "The passwords do not match",
+    "password_reset_success": "Password reset"
   },
   "reg_codes": {
     "delete_code_confirm": "Delete code {code}?",
@@ -385,7 +391,23 @@
     "range_note": "{start} to {end}, delivered orders only",
     "revenue_amount": "Revenue",
     "order_count": "Orders",
-    "no_trend_data": "No delivered orders in this range"
+    "no_trend_data": "No delivered orders in this range",
+    "buyer_trend_title": "New and returning customer orders",
+    "new_buyer_orders": "New customer orders",
+    "returning_buyer_orders": "Returning customer orders",
+    "unidentified_buyer_orders": "Unidentified orders",
+    "no_buyer_trend_data": "No identifiable customer orders in this range",
+    "returning_orders_detail_title": "Returning orders for {period}",
+    "repurchase_order_no": "Returning order no.",
+    "first_order_no": "First order no.",
+    "provider_trade_no": "Provider order no.",
+    "buyer_info": "Customer",
+    "order_buyer_email": "Order email",
+    "payment_buyer": "Payment customer",
+    "system_user_id": "User ID",
+    "purchase_number": "Purchase no.",
+    "paid_at": "Paid at",
+    "no_returning_orders": "No returning orders in this period"
   },
   "apps": {
     "input_name": "Enter name",
@@ -426,6 +448,12 @@
     "resource_url": "Resource URL",
     "sort_order": "Sort order",
     "basic_info": "Basic Info",
+    "payment_channels": "Payment Methods",
+    "payment_channels_hint": "When selected, this app only shows and accepts the selected global payment channels.",
+    "payment_channels_fallback_hint": "With no channels selected, the app follows globally enabled payment methods. Disabled global channels cannot be selected.",
+    "payment_channel_disabled": "Globally disabled",
+    "no_payment_channels": "No payment channels. Configure one in Payment Settings first.",
+    "load_payment_channels_failed": "Failed to load app payment methods",
     "buy_page": "Buy Page",
     "sync_version": "Sync Version",
     "version_sync_info": "Version Sync Info",
@@ -521,11 +549,13 @@
     "time": "Time"
   },
   "devices": {
-    "device_id": "",
-    "binding_time": "",
-    "expire_time": "",
+    "device_id": "Device ID",
+    "bound_reg_code_count": "Previously bound codes",
+    "reg_codes_dialog_title": "Codes previously bound to {deviceId}",
+    "binding_time": "Binding time",
+    "expire_time": "Expiration time",
     "remaining": "Remaining",
-    "apptitle": ""
+    "apptitle": "App"
   },
   "system_settings": {
     "title": "System Settings",

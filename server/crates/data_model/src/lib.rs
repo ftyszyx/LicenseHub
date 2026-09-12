@@ -1,4 +1,5 @@
 pub mod app_devices;
+pub mod app_payment_channels;
 pub mod app_version_sync_logs;
 pub mod apps;
 pub mod distribution_commission_adjustment_offsets;

@@ -17,6 +17,7 @@ pub struct Model {
     pub status: i16,
     pub provider: String,
     pub provider_trade_no: Option<String>,
+    pub provider_buyer_id: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub pay_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

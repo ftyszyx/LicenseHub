@@ -205,7 +205,7 @@ fn normalize_username(value: &str) -> Result<String, AppError> {
     Ok(value)
 }
 
-fn validate_password(value: &str) -> Result<(), AppError> {
+pub(crate) fn validate_password(value: &str) -> Result<(), AppError> {
     if !(8..=72).contains(&value.as_bytes().len()) {
         return Err(AppError::validation("密码长度必须在 8 到 72 字节之间"));
     }

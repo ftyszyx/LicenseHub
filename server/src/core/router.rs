@@ -74,6 +74,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("dashboard", "READ"))
                 .get(apis::dashboard_handler::get_dashboard_trend),
         )
+        .push(
+            Router::with_path("dashboard/returning-orders")
+                .hoop(RequirePerm::new("dashboard", "READ"))
+                .get(apis::dashboard_handler::list_dashboard_returning_orders),
+        )
         //permissions
         .push(
             Router::with_path("permissions/list")
@@ -126,6 +131,11 @@ pub fn create_router(app_state: AppState) -> Service {
                 .hoop(RequirePerm::new("users", "UPDATE"))
                 .post(apis::user_handler::reset_referral_code),
         )
+        .push(
+            Router::with_path("users/{id}/password/reset")
+                .hoop(RequirePerm::new("users", "UPDATE"))
+                .post(apis::user_handler::reset_password),
+        )
         //apps
         .push(
             Router::with_path("apps")
@@ -146,6 +156,16 @@ pub fn create_router(app_state: AppState) -> Service {
             Router::with_path("apps/{id}")
                 .hoop(RequirePerm::new("apps", "UPDATE"))
                 .put(apis::app_handler::update),
+        )
+        .push(
+            Router::with_path("apps/{id}/payment-channels")
+                .hoop(RequirePerm::new("apps", "READ"))
+                .get(apis::app_handler::get_payment_channels),
+        )
+        .push(
+            Router::with_path("apps/{id}/payment-channels")
+                .hoop(RequirePerm::new("apps", "UPDATE"))
+                .put(apis::app_handler::update_payment_channels),
         )
         .push(
             Router::with_path("apps/{id}")

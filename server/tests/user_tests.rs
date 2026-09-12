@@ -146,6 +146,44 @@ async fn test_update_user() {
 }
 
 #[tokio::test]
+async fn test_reset_user_password() {
+    let _lock = helpers::db_lock().await;
+    let app = helpers::create_test_app().await;
+    let token = helpers::login_admin(&app).await;
+    let username = format!(
+        "reset_user_{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap()
+    );
+    let old_password = "oldpassword123";
+    let new_password = "newpassword456";
+    let response = TestClient::post(helpers::get_url("/api/admin/users"))
+        .add_header("authorization", format!("Bearer {}", token), true)
+        .add_header("content-type", "application/json", true)
+        .json(&json!({"username": username, "password": old_password}))
+        .send(&app)
+        .await;
+    let json =
+        helpers::print_response_body_get_json(response, "create_user_for_password_reset").await;
+    let user_id = json["data"]["user"]["id"].as_i64().unwrap();
+
+    let response = TestClient::post(helpers::get_url(&format!(
+        "/api/admin/users/{user_id}/password/reset"
+    )))
+    .add_header("authorization", format!("Bearer {}", token), true)
+    .add_header("content-type", "application/json", true)
+    .json(&json!({"new_password": new_password}))
+    .send(&app)
+    .await;
+    let reset_json = helpers::print_response_body_get_json(response, "reset_user_password").await;
+    assert!(reset_json["success"].as_bool().unwrap());
+
+    let old_login = helpers::login_user(&app, &username, old_password, "old_password_login").await;
+    assert!(!old_login["success"].as_bool().unwrap());
+    let new_login = helpers::login_user(&app, &username, new_password, "new_password_login").await;
+    assert!(new_login["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
 async fn test_delete_user() {
     let _lock = helpers::db_lock().await;
     let app = helpers::create_test_app().await;

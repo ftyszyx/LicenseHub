@@ -13,8 +13,8 @@ use crate::core::resource_service::{ResourceUpload, download_resource, upload_re
 use crate::core::response::ApiResponse;
 use chrono::{Duration, FixedOffset, NaiveDate, TimeZone, Utc};
 use data_model::{
-    apps, distribution_commissions, license_plans, order_events, order_refund_attachments,
-    order_refunds, orders, payment_channels, reg_codes, resources, users,
+    app_payment_channels, apps, distribution_commissions, license_plans, order_events,
+    order_refund_attachments, order_refunds, orders, payment_channels, reg_codes, resources, users,
 };
 use payment_adapter::{
     AlipayPageAdapter, AlipayPageConfig, CreatePaymentRequest, PaymentAdapter, PaymentError,
@@ -187,6 +187,11 @@ pub struct ListPlansParams {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct PublicPlansParams {
+    pub app_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct PublicPayMethodsParams {
     pub app_id: Option<i32>,
 }
 
@@ -612,9 +617,17 @@ pub async fn list_public_plans(
 }
 
 #[handler]
-pub async fn list_pay_methods(depot: &mut Depot) -> Result<ApiResponse<PayMethodsInfo>, AppError> {
+pub async fn list_pay_methods(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<PayMethodsInfo>, AppError> {
     let state = depot.obtain::<AppState>().unwrap();
-    Ok(ApiResponse::success(fetch_pay_methods_impl(state).await?))
+    let params = req
+        .parse_queries::<PublicPayMethodsParams>()
+        .unwrap_or_default();
+    Ok(ApiResponse::success(
+        fetch_pay_methods_impl(state, params.app_id).await?,
+    ))
 }
 
 #[handler]
@@ -879,7 +892,10 @@ pub async fn get_payment_channel_by_id_impl(
     PaymentChannelInfo::try_from(channel)
 }
 
-async fn fetch_pay_methods_impl(state: &AppState) -> Result<PayMethodsInfo, AppError> {
+async fn fetch_pay_methods_impl(
+    state: &AppState,
+    app_id: Option<i32>,
+) -> Result<PayMethodsInfo, AppError> {
     let cfg = &state.config.payment;
     if !cfg.enabled {
         return Ok(PayMethodsInfo {
@@ -890,12 +906,40 @@ async fn fetch_pay_methods_impl(state: &AppState) -> Result<PayMethodsInfo, AppE
             message: Some("payment is disabled".to_string()),
         });
     }
-    let channels = payment_channels::Entity::find()
+    let selected_channel_ids = if let Some(app_id) = app_id {
+        let app_exists = apps::Entity::find_by_id(app_id)
+            .one(&state.db)
+            .await?
+            .is_some();
+        if !app_exists {
+            return Ok(PayMethodsInfo {
+                enabled: false,
+                provider: "database".to_string(),
+                merchant_active: false,
+                methods: Vec::new(),
+                message: Some("application is not found".to_string()),
+            });
+        }
+        let ids = app_payment_channels::Entity::find()
+            .filter(app_payment_channels::Column::AppId.eq(app_id))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|row| row.payment_channel_id)
+            .collect::<Vec<_>>();
+        if ids.is_empty() { None } else { Some(ids) }
+    } else {
+        None
+    };
+
+    let mut channel_query = payment_channels::Entity::find()
         .filter(payment_channels::Column::Status.eq(i16::from(PaymentChannelStatus::Enabled)))
         .order_by_asc(payment_channels::Column::SortOrder)
-        .order_by_asc(payment_channels::Column::Id)
-        .all(&state.db)
-        .await?;
+        .order_by_asc(payment_channels::Column::Id);
+    if let Some(ids) = selected_channel_ids {
+        channel_query = channel_query.filter(payment_channels::Column::Id.is_in(ids));
+    }
+    let channels = channel_query.all(&state.db).await?;
     if channels.is_empty() {
         return Ok(PayMethodsInfo {
             enabled: false,
@@ -1093,11 +1137,15 @@ fn build_test_orders(
     month: &str,
 ) -> Vec<orders::ActiveModel> {
     let seconds_in_range = (month_end - month_start).num_seconds().max(1) as u128;
+    let batch_id = Uuid::new_v4().simple().to_string();
+    let buyer_count = (quantity + 1) / 2;
     (0..quantity)
-        .map(|_| {
+        .map(|index| {
             let random_offset = (Uuid::new_v4().as_u128() % seconds_in_range) as i64;
             let occurred_at = month_start + Duration::seconds(random_offset);
             let order_no = new_test_order_no();
+            let buyer_index = index % buyer_count;
+            let provider_buyer_id = format!("test-{batch_id}-{buyer_index}");
             orders::ActiveModel {
                 order_no: Set(order_no.clone()),
                 plan_id: Set(plan.id),
@@ -1107,6 +1155,8 @@ fn build_test_orders(
                 status: Set(i16::from(OrderStatus::Delivered)),
                 provider: Set("test".to_string()),
                 provider_trade_no: Set(Some(order_no)),
+                provider_buyer_id: Set(Some(provider_buyer_id.clone())),
+                buyer_email: Set(Some(format!("{provider_buyer_id}@example.com"))),
                 provider_payload: Set(Some(json!({
                     "test_order": true,
                     "test_month": month,
@@ -1127,13 +1177,6 @@ pub async fn create_order_impl(
     buyer_user_id: Option<i32>,
 ) -> Result<OrderInfo, AppError> {
     let pay_type = normalize_pay_type(&req.pay_type)?;
-    let channel = find_payment_channel_by_pay_type(state, &pay_type).await?;
-    let provider = channel
-        .as_ref()
-        .map(|channel| channel.provider.as_str())
-        .map(Ok)
-        .unwrap_or_else(|| provider_for_pay_type(&pay_type))?
-        .to_string();
     let (plan, app) = license_plans::Entity::find_by_id(req.plan_id)
         .find_also_related(apps::Entity)
         .one(&state.db)
@@ -1155,6 +1198,14 @@ pub async fn create_order_impl(
             "plan price is invalid",
         ));
     }
+
+    let channel = find_payment_channel_for_app(state, app.id, &pay_type).await?;
+    let provider = channel
+        .as_ref()
+        .map(|channel| channel.provider.as_str())
+        .map(Ok)
+        .unwrap_or_else(|| provider_for_pay_type(&pay_type))?
+        .to_string();
 
     let buyer = if let Some(user_id) = buyer_user_id {
         let user = users::Entity::find_by_id(user_id)
@@ -2060,6 +2111,13 @@ pub async fn process_payment_notification(
     }
 
     if OrderStatus::from(order.status) == OrderStatus::Delivered {
+        if order.provider_buyer_id.is_none() && notification.provider_buyer_id.is_some() {
+            let now = Utc::now().fixed_offset();
+            let mut active = order.clone().into_active_model();
+            active.provider_buyer_id = Set(notification.provider_buyer_id.clone());
+            active.updated_at = Set(now);
+            active.update(&tx).await?;
+        }
         if let Some(reg_code_id) = order.reg_code_id {
             let now = Utc::now().fixed_offset();
             reg_codes::Entity::update_many()
@@ -2116,6 +2174,7 @@ pub async fn process_payment_notification(
     let mut active = order.into_active_model();
     active.status = Set(i16::from(OrderStatus::Delivered));
     active.provider_trade_no = Set(notification.provider_trade_no.clone());
+    active.provider_buyer_id = Set(notification.provider_buyer_id.clone());
     active.reg_code_id = Set(Some(reg_code.id));
     active.provider_payload = Set(Some(notification.raw_payload.clone()));
     active.paid_at = Set(Some(now));
@@ -2276,6 +2335,39 @@ async fn find_payment_channel_by_pay_type(
     pay_type: &str,
 ) -> Result<Option<payment_channels::Model>, AppError> {
     Ok(payment_channels::Entity::find()
+        .filter(payment_channels::Column::PayType.eq(pay_type))
+        .one(&state.db)
+        .await?)
+}
+
+/// Resolve a channel for a new order while preserving the legacy behavior for
+/// applications that have no application-specific channel rows yet.
+async fn find_payment_channel_for_app(
+    state: &AppState,
+    app_id: i32,
+    pay_type: &str,
+) -> Result<Option<payment_channels::Model>, AppError> {
+    let configured = app_payment_channels::Entity::find()
+        .filter(app_payment_channels::Column::AppId.eq(app_id))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if !configured {
+        return find_payment_channel_by_pay_type(state, pay_type).await;
+    }
+
+    let channel_ids = app_payment_channels::Entity::find()
+        .filter(app_payment_channels::Column::AppId.eq(app_id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|row| row.payment_channel_id)
+        .collect::<Vec<_>>();
+    if channel_ids.is_empty() {
+        return Ok(None);
+    }
+    Ok(payment_channels::Entity::find()
+        .filter(payment_channels::Column::Id.is_in(channel_ids))
         .filter(payment_channels::Column::PayType.eq(pay_type))
         .one(&state.db)
         .await?)
@@ -2680,6 +2772,22 @@ mod tests {
         assert_eq!(first.amount_cents.clone().unwrap(), plan.price_cents);
         assert_eq!(first.pay_type.clone().unwrap(), "test");
         assert_eq!(first.provider.clone().unwrap(), "test");
+        assert!(
+            first
+                .provider_buyer_id
+                .clone()
+                .unwrap()
+                .unwrap()
+                .starts_with("test-")
+        );
+        assert!(
+            first
+                .buyer_email
+                .clone()
+                .unwrap()
+                .unwrap()
+                .ends_with("@example.com")
+        );
         assert_eq!(
             first.status.clone().unwrap(),
             i16::from(OrderStatus::Delivered)
@@ -2697,6 +2805,11 @@ mod tests {
                 "test_month": "2026-07",
             }))
         );
+        let unique_buyers = generated
+            .iter()
+            .filter_map(|order| order.provider_buyer_id.clone().unwrap())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(unique_buyers.len(), 50);
         for order in generated {
             let paid_at = order.paid_at.unwrap().unwrap();
             assert!(paid_at >= month_start);

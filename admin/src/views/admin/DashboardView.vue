@@ -80,6 +80,24 @@
       </div>
     </el-card>
 
+    <el-card shadow="never">
+      <template #header>
+        <div>
+          <div class="font-medium text-slate-950">{{ $t('dashboard.buyer_trend_title') }}</div>
+          <div class="mt-1 text-xs text-slate-500">{{ trendRangeLabel }}</div>
+        </div>
+      </template>
+      <div v-loading="trendLoading" class="trend-chart-shell">
+        <div v-show="hasBuyerTrendData" ref="buyerTrendChartElement" class="trend-chart-canvas"></div>
+        <el-empty
+          v-if="!trendLoading && !hasBuyerTrendData"
+          class="trend-chart-empty"
+          :description="$t('dashboard.no_buyer_trend_data')"
+          :image-size="90"
+        />
+      </div>
+    </el-card>
+
     <div class="grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
       <el-card shadow="never">
         <template #header>
@@ -131,6 +149,73 @@
         </el-table>
       </el-card>
     </div>
+
+    <el-dialog
+      v-model="returningOrdersDialog.visible"
+      :title="$t('dashboard.returning_orders_detail_title', { period: returningOrdersDialog.period })"
+      width="90%"
+      destroy-on-close
+    >
+      <el-table
+        v-loading="returningOrdersDialog.loading"
+        :data="returningOrdersDialog.rows"
+        stripe
+        size="large"
+        max-height="560"
+        style="width: 100%"
+      >
+        <el-table-column prop="order_no" :label="$t('dashboard.repurchase_order_no')" min-width="210" />
+        <el-table-column :label="$t('dashboard.buyer_info')" min-width="220">
+          <template #default="{ row }">
+            <div>{{ row.buyer_username || row.buyer_user_email || '-' }}</div>
+            <div v-if="row.buyer_username && row.buyer_user_email" class="text-xs text-slate-500">
+              {{ row.buyer_user_email }}
+            </div>
+            <div v-if="row.buyer_user_id" class="text-xs text-slate-400">
+              {{ $t('dashboard.system_user_id') }}: {{ row.buyer_user_id }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="buyer_email" :label="$t('dashboard.order_buyer_email')" min-width="210">
+          <template #default="{ row }">{{ row.buyer_email || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="$t('dashboard.payment_buyer')" min-width="220">
+          <template #default="{ row }">
+            <div>{{ row.provider }}</div>
+            <div class="break-all font-mono text-xs text-slate-500">{{ row.provider_buyer_id }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('dashboard.purchase_number')" width="110" align="center">
+          <template #default="{ row }">{{ row.purchase_number }}</template>
+        </el-table-column>
+        <el-table-column prop="first_order_no" :label="$t('dashboard.first_order_no')" min-width="210" />
+        <el-table-column prop="provider_trade_no" :label="$t('dashboard.provider_trade_no')" min-width="190">
+          <template #default="{ row }">{{ row.provider_trade_no || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="app_name" :label="$t('reg_codes.app')" min-width="140" />
+        <el-table-column :label="$t('orders.final_price')" width="120">
+          <template #default="{ row }">&yen;{{ formatPrice(row.amount_cents) }}</template>
+        </el-table-column>
+        <el-table-column :label="$t('dashboard.paid_at')" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.paid_at || row.created_at) }}</template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :description="$t('dashboard.no_returning_orders')" :image-size="80" />
+        </template>
+      </el-table>
+      <div class="mt-4 flex justify-end">
+        <el-pagination
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          :page-sizes="[10, 20, 50, 100]"
+          :page-size="returningOrdersDialog.pageSize"
+          :current-page="returningOrdersDialog.page"
+          :total="returningOrdersDialog.total"
+          @current-change="changeReturningOrdersPage"
+          @size-change="changeReturningOrdersPageSize"
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -151,8 +236,13 @@ import {
 } from 'echarts/components'
 import { init, use, type ComposeOption, type EChartsType } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { fetchDashboardStats, fetchDashboardTrend } from '@/apis/dashboard'
+import {
+  fetchDashboardReturningOrders,
+  fetchDashboardStats,
+  fetchDashboardTrend,
+} from '@/apis/dashboard'
 import type {
+  DashboardReturningOrder,
   DashboardStats,
   DashboardTrend,
   DashboardTrendGroupBy,
@@ -192,10 +282,21 @@ const selectedRange = ref<[Date, Date]>(defaultTrendRange('day'))
 const valueMode = ref<TrendValueMode>('period')
 const chartType = ref<TrendChartType>('bar')
 const trendChartElement = ref<HTMLElement>()
+const buyerTrendChartElement = ref<HTMLElement>()
 const trend = reactive<DashboardTrend>({ points: [], apps: [] })
 let trendChart: EChartsType | undefined
+let buyerTrendChart: EChartsType | undefined
 let resizeObserver: ResizeObserver | undefined
 let trendRequestId = 0
+const returningOrdersDialog = reactive({
+  visible: false,
+  loading: false,
+  period: '',
+  page: 1,
+  pageSize: 20,
+  total: 0,
+  rows: [] as DashboardReturningOrder[],
+})
 const stats = reactive<DashboardStats>({
   total_revenue_cents: 0,
   total_orders: 0,
@@ -238,21 +339,39 @@ const hasTrendData = computed(() => trend.points.some(
   point => point.revenue_cents !== 0 || point.order_count !== 0,
 ))
 
+const hasBuyerTrendData = computed(() => trend.points.some(
+  point => point.new_buyer_order_count !== 0
+    || point.returning_buyer_order_count !== 0
+    || point.unidentified_buyer_order_count !== 0,
+))
+
 const chartPoints = computed(() => {
   let revenueCents = 0
   let orderCount = 0
+  let newBuyerOrderCount = 0
+  let returningBuyerOrderCount = 0
+  let unidentifiedBuyerOrderCount = 0
   return trend.points.map((point) => {
     if (valueMode.value === 'cumulative') {
       revenueCents += point.revenue_cents
       orderCount += point.order_count
+      newBuyerOrderCount += point.new_buyer_order_count
+      returningBuyerOrderCount += point.returning_buyer_order_count
+      unidentifiedBuyerOrderCount += point.unidentified_buyer_order_count
     } else {
       revenueCents = point.revenue_cents
       orderCount = point.order_count
+      newBuyerOrderCount = point.new_buyer_order_count
+      returningBuyerOrderCount = point.returning_buyer_order_count
+      unidentifiedBuyerOrderCount = point.unidentified_buyer_order_count
     }
     return {
       period: point.period,
       revenue: revenueCents / 100,
       orders: orderCount,
+      newBuyerOrders: newBuyerOrderCount,
+      returningBuyerOrders: returningBuyerOrderCount,
+      unidentifiedBuyerOrders: unidentifiedBuyerOrderCount,
     }
   })
 })
@@ -442,6 +561,132 @@ function renderTrendChart() {
   })
 }
 
+function renderBuyerTrendChart() {
+  void nextTick(() => {
+    if (!buyerTrendChartElement.value || !hasBuyerTrendData.value) return
+    if (!buyerTrendChart) {
+      buyerTrendChart = init(buyerTrendChartElement.value)
+      buyerTrendChart.on('click', openReturningOrdersFromChart)
+    }
+    const points = chartPoints.value
+    const seriesStyle = chartType.value === 'bar'
+      ? { barMaxWidth: 34 }
+      : { smooth: true, showSymbol: false, symbolSize: 7 }
+    const option: TrendChartOption = {
+      animationDuration: 300,
+      color: ['#0f766e', '#d97706', '#64748b'],
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0, left: 0 },
+      grid: { top: 52, right: 30, bottom: 68, left: 70, containLabel: false },
+      dataZoom: [
+        {
+          type: 'inside',
+          xAxisIndex: 0,
+          filterMode: 'none',
+          zoomOnMouseWheel: true,
+          moveOnMouseWheel: false,
+          moveOnMouseMove: true,
+          preventDefaultMouseMove: true,
+        },
+        {
+          type: 'slider',
+          xAxisIndex: 0,
+          filterMode: 'none',
+          bottom: 8,
+          height: 22,
+          showDetail: false,
+          borderColor: '#cbd5e1',
+          fillerColor: 'rgba(15, 118, 110, 0.14)',
+          handleStyle: { color: '#0f766e', borderColor: '#0f766e' },
+        },
+      ],
+      xAxis: {
+        type: 'category',
+        boundaryGap: chartType.value === 'bar',
+        data: points.map(point => point.period),
+        axisTick: { alignWithLabel: true },
+        axisLabel: {
+          hideOverlap: true,
+          formatter: (value: string) => groupBy.value === 'hour' || groupBy.value === 'day'
+            ? value.slice(5)
+            : value,
+        },
+      },
+      yAxis: {
+        type: 'value',
+        name: t('dashboard.order_count'),
+        minInterval: 1,
+        axisLabel: { formatter: (value: number) => value.toLocaleString() },
+        splitLine: { lineStyle: { color: '#e2e8f0' } },
+      },
+      series: [
+        {
+          id: 'newBuyerOrders',
+          name: t('dashboard.new_buyer_orders'),
+          type: chartType.value,
+          data: points.map(point => point.newBuyerOrders),
+          ...seriesStyle,
+        } as BarSeriesOption | LineSeriesOption,
+        {
+          id: 'returningBuyerOrders',
+          name: t('dashboard.returning_buyer_orders'),
+          type: chartType.value,
+          data: points.map(point => point.returningBuyerOrders),
+          cursor: 'pointer',
+          ...seriesStyle,
+        } as BarSeriesOption | LineSeriesOption,
+        {
+          id: 'unidentifiedBuyerOrders',
+          name: t('dashboard.unidentified_buyer_orders'),
+          type: chartType.value,
+          data: points.map(point => point.unidentifiedBuyerOrders),
+          ...seriesStyle,
+        } as BarSeriesOption | LineSeriesOption,
+      ],
+    }
+    buyerTrendChart.setOption(option, true)
+  })
+}
+
+function openReturningOrdersFromChart(params: { seriesId?: string; dataIndex?: number }) {
+  if (params.seriesId !== 'returningBuyerOrders' || params.dataIndex === undefined) return
+  const point = trend.points[params.dataIndex]
+  if (!point || point.returning_buyer_order_count === 0) return
+  returningOrdersDialog.period = point.period
+  returningOrdersDialog.page = 1
+  returningOrdersDialog.visible = true
+  void loadReturningOrders()
+}
+
+async function loadReturningOrders() {
+  if (!returningOrdersDialog.period) return
+  returningOrdersDialog.loading = true
+  try {
+    const data = await fetchDashboardReturningOrders({
+      group_by: groupBy.value,
+      period: returningOrdersDialog.period,
+      app_id: selectedAppId.value || undefined,
+      page: returningOrdersDialog.page,
+      page_size: returningOrdersDialog.pageSize,
+    })
+    returningOrdersDialog.rows = data.list
+    returningOrdersDialog.total = data.total
+  } finally {
+    returningOrdersDialog.loading = false
+  }
+}
+
+function changeReturningOrdersPage(page: number) {
+  returningOrdersDialog.page = page
+  void loadReturningOrders()
+}
+
+function changeReturningOrdersPageSize(pageSize: number) {
+  returningOrdersDialog.pageSize = pageSize
+  returningOrdersDialog.page = 1
+  void loadReturningOrders()
+}
+
 function orderStatusLabel(status: OrderStatus) {
   return t(`orders.status_${status}`)
 }
@@ -489,6 +734,7 @@ async function loadTrend() {
     trend.points = data.points
     trend.apps = data.apps
     renderTrendChart()
+    renderBuyerTrendChart()
   } finally {
     if (requestId === trendRequestId) trendLoading.value = false
   }
@@ -503,17 +749,28 @@ function goOrders() {
 }
 
 watch(groupBy, (value) => {
+  returningOrdersDialog.visible = false
   selectedRange.value = defaultTrendRange(value)
   void loadTrend()
 })
-watch(selectedAppId, () => void loadTrend())
-watch([chartType, valueMode, locale], renderTrendChart)
+watch(selectedAppId, () => {
+  returningOrdersDialog.visible = false
+  void loadTrend()
+})
+watch([chartType, valueMode, locale], () => {
+  renderTrendChart()
+  renderBuyerTrendChart()
+})
 
 onMounted(async () => {
   await nextTick()
   if (trendChartElement.value) {
-    resizeObserver = new ResizeObserver(() => trendChart?.resize())
+    resizeObserver = new ResizeObserver(() => {
+      trendChart?.resize()
+      buyerTrendChart?.resize()
+    })
     resizeObserver.observe(trendChartElement.value)
+    if (buyerTrendChartElement.value) resizeObserver.observe(buyerTrendChartElement.value)
   }
   await reload()
 })
@@ -521,6 +778,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   trendChart?.dispose()
+  buyerTrendChart?.dispose()
 })
 </script>
 

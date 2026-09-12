@@ -296,6 +296,11 @@ impl PaymentAdapter for WechatNativeAdapter {
             pay_type: PAY_TYPE_WECHAT_NATIVE.to_string(),
             out_trade_no: transaction.out_trade_no.clone(),
             provider_trade_no: transaction.transaction_id.clone(),
+            provider_buyer_id: transaction
+                .payer
+                .as_ref()
+                .map(|payer| payer.openid.trim().to_string())
+                .filter(|openid| !openid.is_empty()),
             amount_cents: transaction.amount.total,
             status,
             raw_payload: json!({
@@ -351,6 +356,11 @@ impl PaymentAdapter for WechatNativeAdapter {
             pay_type: PAY_TYPE_WECHAT_NATIVE.to_string(),
             out_trade_no: transaction.out_trade_no.clone(),
             provider_trade_no: transaction.transaction_id.clone(),
+            provider_buyer_id: transaction
+                .payer
+                .as_ref()
+                .map(|payer| payer.openid.trim().to_string())
+                .filter(|openid| !openid.is_empty()),
             amount_cents: transaction.amount.total,
             status: wechat_payment_status(&transaction.trade_state),
             raw_payload: json!({
@@ -421,8 +431,15 @@ struct WechatTransaction {
     transaction_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     trade_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    payer: Option<WechatPayer>,
     trade_state: String,
     amount: WechatTransactionAmount,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct WechatPayer {
+    openid: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -521,6 +538,9 @@ mod tests {
             "mchid": "1900000001",
             "out_trade_no": "LH202609020001",
             "trade_state": "NOTPAY",
+            "payer": {
+                "openid": "test-openid"
+            },
             "amount": {
                 "total": 700,
                 "currency": "CNY"
@@ -529,6 +549,7 @@ mod tests {
         .expect("trade_type is optional for a pending order query");
 
         assert_eq!(transaction.trade_type, None);
+        assert_eq!(transaction.payer.unwrap().openid, "test-openid");
         assert_eq!(
             wechat_payment_status(&transaction.trade_state),
             PaymentStatus::Pending

@@ -1,3 +1,4 @@
+use crate::apis::list_api::{ListParamsReq, PagingResponse};
 use crate::apis::payment_handler::OrderStatus;
 use crate::core::app::AppState;
 use crate::core::my_error::AppError;
@@ -56,6 +57,9 @@ pub struct DashboardTrendPoint {
     pub period: String,
     pub revenue_cents: i64,
     pub order_count: u64,
+    pub new_buyer_order_count: u64,
+    pub returning_buyer_order_count: u64,
+    pub unidentified_buyer_order_count: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,6 +72,36 @@ pub struct DashboardTrend {
 pub struct DashboardTrendApp {
     pub id: i32,
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DashboardReturningOrdersParams {
+    pub group_by: Option<String>,
+    pub period: String,
+    #[serde(deserialize_with = "from_str_optional", default)]
+    pub app_id: Option<i32>,
+    #[serde(flatten)]
+    pub pagination: ListParamsReq,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardReturningOrder {
+    pub order_no: String,
+    pub provider_trade_no: Option<String>,
+    pub first_order_no: String,
+    pub purchase_number: u64,
+    pub app_id: i32,
+    pub app_name: String,
+    pub amount_cents: i32,
+    pub provider: String,
+    pub pay_type: String,
+    pub provider_buyer_id: String,
+    pub buyer_user_id: Option<i32>,
+    pub buyer_username: Option<String>,
+    pub buyer_user_email: Option<String>,
+    pub buyer_email: Option<String>,
+    pub paid_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,6 +143,18 @@ pub async fn get_dashboard_trend(
     let params = req.parse_queries::<DashboardTrendParams>()?;
     Ok(ApiResponse::success(
         get_dashboard_trend_impl(state, params).await?,
+    ))
+}
+
+#[handler]
+pub async fn list_dashboard_returning_orders(
+    depot: &mut Depot,
+    req: &mut Request,
+) -> Result<ApiResponse<PagingResponse<DashboardReturningOrder>>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let params = req.parse_queries::<DashboardReturningOrdersParams>()?;
+    Ok(ApiResponse::success(
+        list_dashboard_returning_orders_impl(state, params).await?,
     ))
 }
 
@@ -196,65 +242,63 @@ pub async fn get_dashboard_trend_impl(
         TrendGroupBy::Month => (format!("{start}-01"), format!("{end}-01")),
         TrendGroupBy::Year => (format!("{start}-01-01"), format!("{end}-01-01")),
     };
-    let sql = match group_by {
-        TrendGroupBy::Hour => {
-            r#"
-            SELECT
-                TO_CHAR(DATE_TRUNC('hour', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at"))), 'YYYY-MM-DD HH24:00') AS period,
-                COALESCE(SUM("amount_cents"), 0)::BIGINT AS revenue_cents,
-                COUNT(*)::BIGINT AS order_count
-            FROM "orders"
-            WHERE "status" = $1
-              AND TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")) >= $2::TIMESTAMP
-              AND TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")) < $3::TIMESTAMP + INTERVAL '1 hour'
-              AND ($4::INTEGER IS NULL OR "app_id" = $4)
-            GROUP BY period
-            ORDER BY period
-            "#
-        }
-        TrendGroupBy::Day => {
-            r#"
-            SELECT
-                TO_CHAR(TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")), 'YYYY-MM-DD') AS period,
-                COALESCE(SUM("amount_cents"), 0)::BIGINT AS revenue_cents,
-                COUNT(*)::BIGINT AS order_count
-            FROM "orders"
-            WHERE "status" = $1
-              AND TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at"))::DATE BETWEEN $2::DATE AND $3::DATE
-              AND ($4::INTEGER IS NULL OR "app_id" = $4)
-            GROUP BY period
-            ORDER BY period
-            "#
-        }
-        TrendGroupBy::Month => {
-            r#"
-            SELECT
-                TO_CHAR(DATE_TRUNC('month', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at"))), 'YYYY-MM') AS period,
-                COALESCE(SUM("amount_cents"), 0)::BIGINT AS revenue_cents,
-                COUNT(*)::BIGINT AS order_count
-            FROM "orders"
-            WHERE "status" = $1
-              AND DATE_TRUNC('month', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")))::DATE BETWEEN $2::DATE AND $3::DATE
-              AND ($4::INTEGER IS NULL OR "app_id" = $4)
-            GROUP BY period
-            ORDER BY period
-            "#
-        }
-        TrendGroupBy::Year => {
-            r#"
-            SELECT
-                TO_CHAR(DATE_TRUNC('year', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at"))), 'YYYY') AS period,
-                COALESCE(SUM("amount_cents"), 0)::BIGINT AS revenue_cents,
-                COUNT(*)::BIGINT AS order_count
-            FROM "orders"
-            WHERE "status" = $1
-              AND DATE_TRUNC('year', TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")))::DATE BETWEEN $2::DATE AND $3::DATE
-              AND ($4::INTEGER IS NULL OR "app_id" = $4)
-            GROUP BY period
-            ORDER BY period
-            "#
-        }
+    let (period_expression, range_expression) = match group_by {
+        TrendGroupBy::Hour => (
+            r#"TO_CHAR(DATE_TRUNC('hour', "event_time"), 'YYYY-MM-DD HH24:00')"#,
+            r#""event_time" >= $2::TIMESTAMP
+              AND "event_time" < $3::TIMESTAMP + INTERVAL '1 hour'"#,
+        ),
+        TrendGroupBy::Day => (
+            r#"TO_CHAR("event_time", 'YYYY-MM-DD')"#,
+            r#""event_time"::DATE BETWEEN $2::DATE AND $3::DATE"#,
+        ),
+        TrendGroupBy::Month => (
+            r#"TO_CHAR(DATE_TRUNC('month', "event_time"), 'YYYY-MM')"#,
+            r#"DATE_TRUNC('month', "event_time")::DATE BETWEEN $2::DATE AND $3::DATE"#,
+        ),
+        TrendGroupBy::Year => (
+            r#"TO_CHAR(DATE_TRUNC('year', "event_time"), 'YYYY')"#,
+            r#"DATE_TRUNC('year', "event_time")::DATE BETWEEN $2::DATE AND $3::DATE"#,
+        ),
     };
+    let sql = format!(
+        r#"
+        WITH classified_orders AS (
+            SELECT
+                "id",
+                "amount_cents",
+                "provider_buyer_id",
+                TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")) AS "event_time",
+                CASE
+                    WHEN "provider_buyer_id" IS NULL THEN NULL
+                    ELSE ROW_NUMBER() OVER (
+                        PARTITION BY "provider", "provider_buyer_id"
+                        ORDER BY COALESCE("paid_at", "created_at"), "id"
+                    )
+                END AS "buyer_order_number"
+            FROM "orders"
+            WHERE "status" = $1
+              AND ($4::INTEGER IS NULL OR "app_id" = $4)
+        )
+        SELECT
+            {period_expression} AS period,
+            COALESCE(SUM("amount_cents"), 0)::BIGINT AS revenue_cents,
+            COUNT(*)::BIGINT AS order_count,
+            COUNT(*) FILTER (
+                WHERE "provider_buyer_id" IS NOT NULL AND "buyer_order_number" = 1
+            )::BIGINT AS new_buyer_order_count,
+            COUNT(*) FILTER (
+                WHERE "provider_buyer_id" IS NOT NULL AND "buyer_order_number" > 1
+            )::BIGINT AS returning_buyer_order_count,
+            COUNT(*) FILTER (
+                WHERE "provider_buyer_id" IS NULL
+            )::BIGINT AS unidentified_buyer_order_count
+        FROM classified_orders
+        WHERE {range_expression}
+        GROUP BY period
+        ORDER BY period
+        "#
+    );
 
     let rows = state
         .db
@@ -277,6 +321,9 @@ pub async fn get_dashboard_trend_impl(
                 (
                     row.try_get::<i64>("", "revenue_cents")?,
                     row.try_get::<i64>("", "order_count")?,
+                    row.try_get::<i64>("", "new_buyer_order_count")?,
+                    row.try_get::<i64>("", "returning_buyer_order_count")?,
+                    row.try_get::<i64>("", "unidentified_buyer_order_count")?,
                 ),
             ))
         })
@@ -298,16 +345,170 @@ pub async fn get_dashboard_trend_impl(
         points: periods
             .into_iter()
             .map(|period| {
-                let (revenue_cents, order_count) = values.get(&period).copied().unwrap_or_default();
+                let (
+                    revenue_cents,
+                    order_count,
+                    new_buyer_order_count,
+                    returning_buyer_order_count,
+                    unidentified_buyer_order_count,
+                ) = values.get(&period).copied().unwrap_or_default();
                 DashboardTrendPoint {
                     period,
                     revenue_cents,
                     order_count: i64_to_u64(order_count),
+                    new_buyer_order_count: i64_to_u64(new_buyer_order_count),
+                    returning_buyer_order_count: i64_to_u64(returning_buyer_order_count),
+                    unidentified_buyer_order_count: i64_to_u64(unidentified_buyer_order_count),
                 }
             })
             .collect(),
         apps,
     })
+}
+
+pub async fn list_dashboard_returning_orders_impl(
+    state: &AppState,
+    params: DashboardReturningOrdersParams,
+) -> Result<PagingResponse<DashboardReturningOrder>, AppError> {
+    if matches!(params.app_id, Some(app_id) if app_id < 1) {
+        return Err(AppError::validation("app_id must be greater than 0"));
+    }
+    let group_by = TrendGroupBy::parse(params.group_by.as_deref())?;
+    let (query_start, query_end) = returning_order_period_bounds(group_by, &params.period)?;
+    let (page, page_size) = params.pagination.resolve()?;
+    let offset = (page - 1)
+        .checked_mul(page_size)
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or_else(|| AppError::validation("pagination offset is too large"))?;
+    let limit =
+        i64::try_from(page_size).map_err(|_| AppError::validation("page_size is too large"))?;
+
+    let classified_orders = r#"
+        WITH classified_orders AS (
+            SELECT
+                "id",
+                "order_no",
+                "provider_trade_no",
+                "app_id",
+                "amount_cents",
+                "provider",
+                "pay_type",
+                "provider_buyer_id",
+                "buyer_user_id",
+                "buyer_email",
+                "paid_at",
+                "created_at",
+                TIMEZONE('Asia/Shanghai', COALESCE("paid_at", "created_at")) AS "event_time",
+                ROW_NUMBER() OVER (
+                    PARTITION BY "provider", "provider_buyer_id"
+                    ORDER BY COALESCE("paid_at", "created_at"), "id"
+                ) AS "buyer_order_number",
+                FIRST_VALUE("order_no") OVER (
+                    PARTITION BY "provider", "provider_buyer_id"
+                    ORDER BY COALESCE("paid_at", "created_at"), "id"
+                ) AS "first_order_no"
+            FROM "orders"
+            WHERE "status" = $1
+              AND "provider_buyer_id" IS NOT NULL
+              AND ($2::INTEGER IS NULL OR "app_id" = $2)
+        )
+    "#;
+    let count_sql = format!(
+        r#"
+        {classified_orders}
+        SELECT COUNT(*)::BIGINT AS "total"
+        FROM classified_orders
+        WHERE "buyer_order_number" > 1
+          AND "event_time" >= $3::TIMESTAMP
+          AND "event_time" < $4::TIMESTAMP
+        "#
+    );
+    let common_values = vec![
+        i16::from(OrderStatus::Delivered).into(),
+        params.app_id.into(),
+        query_start.clone().into(),
+        query_end.clone().into(),
+    ];
+    let total = state
+        .db
+        .query_one(Statement::from_sql_and_values(
+            state.db.get_database_backend(),
+            count_sql,
+            common_values.clone(),
+        ))
+        .await?
+        .map(|row| row.try_get::<i64>("", "total"))
+        .transpose()?
+        .map(i64_to_u64)
+        .unwrap_or_default();
+
+    let list_sql = format!(
+        r#"
+        {classified_orders}
+        SELECT
+            classified_orders."order_no",
+            classified_orders."provider_trade_no",
+            classified_orders."first_order_no",
+            classified_orders."buyer_order_number",
+            classified_orders."app_id",
+            apps."name" AS "app_name",
+            classified_orders."amount_cents",
+            classified_orders."provider",
+            classified_orders."pay_type",
+            classified_orders."provider_buyer_id",
+            classified_orders."buyer_user_id",
+            users."username" AS "buyer_username",
+            users."email" AS "buyer_user_email",
+            classified_orders."buyer_email",
+            classified_orders."paid_at",
+            classified_orders."created_at"
+        FROM classified_orders
+        INNER JOIN "apps" ON apps."id" = classified_orders."app_id"
+        LEFT JOIN "users" ON users."id" = classified_orders."buyer_user_id"
+        WHERE classified_orders."buyer_order_number" > 1
+          AND classified_orders."event_time" >= $3::TIMESTAMP
+          AND classified_orders."event_time" < $4::TIMESTAMP
+        ORDER BY COALESCE(classified_orders."paid_at", classified_orders."created_at") DESC,
+                 classified_orders."id" DESC
+        LIMIT $5 OFFSET $6
+        "#
+    );
+    let mut list_values = common_values;
+    list_values.push(limit.into());
+    list_values.push(offset.into());
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            state.db.get_database_backend(),
+            list_sql,
+            list_values,
+        ))
+        .await?;
+    let list = rows
+        .into_iter()
+        .map(|row| {
+            Ok(DashboardReturningOrder {
+                order_no: row.try_get("", "order_no")?,
+                provider_trade_no: row.try_get("", "provider_trade_no")?,
+                first_order_no: row.try_get("", "first_order_no")?,
+                purchase_number: i64_to_u64(row.try_get("", "buyer_order_number")?),
+                app_id: row.try_get("", "app_id")?,
+                app_name: row.try_get("", "app_name")?,
+                amount_cents: row.try_get("", "amount_cents")?,
+                provider: row.try_get("", "provider")?,
+                pay_type: row.try_get("", "pay_type")?,
+                provider_buyer_id: row.try_get("", "provider_buyer_id")?,
+                buyer_user_id: row.try_get("", "buyer_user_id")?,
+                buyer_username: row.try_get("", "buyer_username")?,
+                buyer_user_email: row.try_get("", "buyer_user_email")?,
+                buyer_email: row.try_get("", "buyer_email")?,
+                paid_at: row.try_get("", "paid_at")?,
+                created_at: row.try_get("", "created_at")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sea_orm::DbErr>>()?;
+
+    Ok(PagingResponse { list, page, total })
 }
 
 fn trend_periods(
@@ -444,6 +645,48 @@ fn trend_periods(
 fn parse_trend_date(value: &str) -> Result<NaiveDate, AppError> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|_| AppError::validation("dates must use YYYY-MM-DD format"))
+}
+
+fn returning_order_period_bounds(
+    group_by: TrendGroupBy,
+    period: &str,
+) -> Result<(String, String), AppError> {
+    let start = match group_by {
+        TrendGroupBy::Hour => {
+            let value =
+                chrono::NaiveDateTime::parse_from_str(period, "%Y-%m-%d %H:%M").map_err(|_| {
+                    AppError::validation("hour period must use YYYY-MM-DD HH:00 format")
+                })?;
+            if value.format("%Y-%m-%d %H:00").to_string() != period {
+                return Err(AppError::validation(
+                    "hour period must use YYYY-MM-DD HH:00 format",
+                ));
+            }
+            value
+        }
+        TrendGroupBy::Day => parse_trend_date(period)?
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| AppError::validation("invalid day period"))?,
+        TrendGroupBy::Month => NaiveDate::parse_from_str(&format!("{period}-01"), "%Y-%m-%d")
+            .map_err(|_| AppError::validation("month period must use YYYY-MM format"))?
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| AppError::validation("invalid month period"))?,
+        TrendGroupBy::Year => NaiveDate::parse_from_str(&format!("{period}-01-01"), "%Y-%m-%d")
+            .map_err(|_| AppError::validation("year period must use YYYY format"))?
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| AppError::validation("invalid year period"))?,
+    };
+    let end = match group_by {
+        TrendGroupBy::Hour => start.checked_add_signed(Duration::hours(1)),
+        TrendGroupBy::Day => start.checked_add_signed(Duration::days(1)),
+        TrendGroupBy::Month => start.checked_add_months(Months::new(1)),
+        TrendGroupBy::Year => start.checked_add_months(Months::new(12)),
+    }
+    .ok_or_else(|| AppError::validation("invalid returning-order period"))?;
+    Ok((
+        start.format("%Y-%m-%d %H:%M:%S").to_string(),
+        end.format("%Y-%m-%d %H:%M:%S").to_string(),
+    ))
 }
 
 fn month_start(date: NaiveDate) -> Result<NaiveDate, AppError> {
@@ -585,5 +828,39 @@ mod tests {
             Ok(TrendGroupBy::Year)
         ));
         assert!(TrendGroupBy::parse(Some("week")).is_err());
+    }
+
+    #[test]
+    fn returning_order_period_bounds_match_chart_periods() {
+        assert_eq!(
+            returning_order_period_bounds(TrendGroupBy::Hour, "2026-09-10 23:00").unwrap(),
+            (
+                "2026-09-10 23:00:00".to_string(),
+                "2026-09-11 00:00:00".to_string()
+            )
+        );
+        assert_eq!(
+            returning_order_period_bounds(TrendGroupBy::Day, "2026-09-10").unwrap(),
+            (
+                "2026-09-10 00:00:00".to_string(),
+                "2026-09-11 00:00:00".to_string()
+            )
+        );
+        assert_eq!(
+            returning_order_period_bounds(TrendGroupBy::Month, "2026-12").unwrap(),
+            (
+                "2026-12-01 00:00:00".to_string(),
+                "2027-01-01 00:00:00".to_string()
+            )
+        );
+        assert_eq!(
+            returning_order_period_bounds(TrendGroupBy::Year, "2026").unwrap(),
+            (
+                "2026-01-01 00:00:00".to_string(),
+                "2027-01-01 00:00:00".to_string()
+            )
+        );
+        assert!(returning_order_period_bounds(TrendGroupBy::Day, "2026-02-30").is_err());
+        assert!(returning_order_period_bounds(TrendGroupBy::Month, "2026-13").is_err());
     }
 }

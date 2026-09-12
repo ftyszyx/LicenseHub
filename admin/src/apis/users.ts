@@ -23,3 +23,7 @@ export async function deleteUser(id: number): Promise<void> {
 export async function resetReferralCode(id: number): Promise<UserWithRoles> {
   return (await request.post(`/admin/users/${id}/referral-code/reset`)).data
 }
+
+export async function resetPassword(id: number, newPassword: string): Promise<void> {
+  return (await request.post(`/admin/users/${id}/password/reset`, { new_password: newPassword })).data
+}

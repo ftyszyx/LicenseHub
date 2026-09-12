@@ -34,8 +34,10 @@ export const fetchPublicPlans = async (params: { app_id?: number } = {}) => {
   return response.data
 }
 
-export const fetchPayMethods = async () => {
-  const response = await request.get('/pay/methods') as ApiResponse<PayMethodsInfo>
+export const fetchPayMethods = async (appId?: number | null) => {
+  const response = await request.get('/pay/methods', {
+    params: appId ? { app_id: appId } : undefined,
+  }) as ApiResponse<PayMethodsInfo>
   return response.data
 }
 

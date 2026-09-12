@@ -76,3 +76,23 @@ export interface UpdateAppReq {
     manifest_extra?: Record<string, unknown>
     status?: number
 }
+
+export interface AppPaymentChannel {
+    id: number
+    name: string
+    provider: string
+    pay_type: string
+    status: number
+    sort_order: number
+}
+
+export interface AppPaymentChannelsInfo {
+    app_id: number
+    configured: boolean
+    selected_channel_ids: number[]
+    channels: AppPaymentChannel[]
+}
+
+export interface UpdateAppPaymentChannelsReq {
+    channel_ids: number[]
+}

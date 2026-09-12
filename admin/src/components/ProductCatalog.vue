@@ -369,7 +369,7 @@ async function copy(text: string) {
 async function loadPayMethods() {
   payMethodsLoading.value = true
   try {
-    const info = await fetchPayMethods()
+    const info = await fetchPayMethods(props.appId ?? selectedPlan.value?.app_id)
     payMethodsInfo.value = info
     payType.value = info.methods.find(method => method.enabled)?.pay_type || ''
   } finally {
@@ -389,7 +389,7 @@ function payMethodMeta(method: PayMethodInfo) {
       icon: '/static/images/pay/wxpay.png',
     }
   }
-  if (method.pay_type === 'alipay') {
+  if (method.pay_type === 'alipay' || method.pay_type === 'alipay_page') {
     return {
       name: method.label || t('products_page.pay_alipay'),
       icon: '/static/images/pay/alipay.png',

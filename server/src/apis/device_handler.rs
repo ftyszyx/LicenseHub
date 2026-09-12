@@ -5,9 +5,21 @@ use crate::core::response::ApiResponse;
 use data_model::{app_devices, apps, reg_code_devices, reg_codes};
 use salvo::prelude::*;
 use salvo_oapi::ToSchema;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
+pub struct DeviceRegCodeInfo {
+    pub id: i32,
+    pub code: String,
+    pub status: i16,
+    pub code_type: i16,
+    pub binding_time: chrono::DateTime<chrono::FixedOffset>,
+    pub effective_time: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
+}
 
 #[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct DeviceInfo {
@@ -18,6 +30,8 @@ pub struct DeviceInfo {
     pub device_info: Option<sea_orm::prelude::Json>,
     pub expire_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub remaining: Option<i32>,
+    pub bound_reg_code_count: u64,
+    pub reg_codes: Vec<DeviceRegCodeInfo>,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
     pub updated_at: chrono::DateTime<chrono::FixedOffset>,
 }
@@ -34,6 +48,8 @@ impl TryFrom<(app_devices::Model, Option<apps::Model>)> for DeviceInfo {
             device_info: app_device.device_info,
             expire_time: app_device.expire_time,
             remaining: app_device.remaining,
+            bound_reg_code_count: 0,
+            reg_codes: Vec::new(),
             created_at: app_device.created_at,
             updated_at: app_device.updated_at,
         })
@@ -61,30 +77,46 @@ async fn enrich_reg_code_remaining_batch(
         .iter()
         .map(|binding| binding.reg_code_id)
         .collect::<HashSet<_>>();
-    let code_balances = reg_codes::Entity::find()
+    let reg_codes_by_id = reg_codes::Entity::find()
         .filter(reg_codes::Column::Id.is_in(reg_code_ids))
-        .filter(reg_codes::Column::Status.eq(2))
-        .filter(reg_codes::Column::CodeType.eq(1))
         .all(&state.db)
-        .await?;
-
-    let remaining_by_reg_code = code_balances
+        .await?
         .into_iter()
-        .map(|reg_code| (reg_code.id, reg_code.remaining_count.unwrap_or(0).max(0)))
+        .map(|reg_code| (reg_code.id, reg_code))
         .collect::<HashMap<_, _>>();
     let mut reg_code_remaining_by_device = HashMap::<i32, i32>::new();
+    let mut reg_codes_by_device = HashMap::<i32, Vec<DeviceRegCodeInfo>>::new();
     for binding in bindings {
-        if let Some(remaining) = remaining_by_reg_code.get(&binding.reg_code_id) {
+        let Some(reg_code) = reg_codes_by_id.get(&binding.reg_code_id) else {
+            continue;
+        };
+        if reg_code.status == 2 && reg_code.code_type == 1 {
             *reg_code_remaining_by_device
                 .entry(binding.device_id)
-                .or_default() += remaining;
+                .or_default() += reg_code.remaining_count.unwrap_or(0).max(0);
         }
+        reg_codes_by_device
+            .entry(binding.device_id)
+            .or_default()
+            .push(DeviceRegCodeInfo {
+                id: reg_code.id,
+                code: reg_code.code.clone(),
+                status: reg_code.status,
+                code_type: reg_code.code_type,
+                binding_time: binding.created_at,
+                effective_time: reg_code.effective_time,
+                expire_time: reg_code.expire_time,
+            });
     }
 
     for info in infos {
         if let Some(reg_code_remaining) = reg_code_remaining_by_device.get(&info.id) {
             info.remaining = Some(info.remaining.unwrap_or(0).max(0) + reg_code_remaining);
         }
+        info.reg_codes = reg_codes_by_device.remove(&info.id).unwrap_or_default();
+        info.reg_codes
+            .sort_by(|a, b| b.binding_time.cmp(&a.binding_time));
+        info.bound_reg_code_count = info.reg_codes.len() as u64;
     }
     Ok(())
 }
@@ -95,6 +127,24 @@ pub struct SearchDevicesParams {
     pub pagination: ListParamsReq,
     pub app_id: Option<i32>,
     pub device_id: Option<String>,
+    pub sort_by: Option<DeviceSortBy>,
+    pub sort_order: Option<DeviceSortOrder>,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceSortBy {
+    #[default]
+    CreatedAt,
+    BoundRegCodeCount,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceSortOrder {
+    Asc,
+    #[default]
+    Desc,
 }
 #[handler]
 pub async fn get_list(
@@ -112,15 +162,29 @@ pub async fn get_list_impl(
     params: SearchDevicesParams,
 ) -> Result<PagingResponse<DeviceInfo>, AppError> {
     let (page, page_size) = params.pagination.resolve()?;
-    let mut query = app_devices::Entity::find()
-        .find_also_related(apps::Entity)
-        .order_by_desc(app_devices::Column::CreatedAt);
+    let mut query = app_devices::Entity::find().find_also_related(apps::Entity);
     if let Some(v) = params.app_id {
         query = query.filter(app_devices::Column::AppId.eq(v));
     }
     if let Some(v) = params.device_id {
         query = query.filter(app_devices::Column::DeviceId.eq(v));
     }
+    let sort_order = match params.sort_order.unwrap_or_default() {
+        DeviceSortOrder::Asc => Order::Asc,
+        DeviceSortOrder::Desc => Order::Desc,
+    };
+    query = match params.sort_by.unwrap_or_default() {
+        DeviceSortBy::CreatedAt => {
+            query.order_by(app_devices::Column::CreatedAt, sort_order.clone())
+        }
+        DeviceSortBy::BoundRegCodeCount => query.order_by(
+            Expr::cust(
+                r#"(SELECT COUNT(*) FROM "reg_code_devices" WHERE "reg_code_devices"."device_id" = "app_devices"."id")"#,
+            ),
+            sort_order.clone(),
+        ),
+    };
+    query = query.order_by(app_devices::Column::Id, sort_order);
     let paginator = query.paginate(&state.db, page_size);
     let total = paginator.num_items().await.unwrap_or(0);
     let result = paginator.fetch_page(page - 1).await?;

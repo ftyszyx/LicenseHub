@@ -224,6 +224,37 @@
             </div>
           </el-tab-pane>
 
+          <el-tab-pane :label="$t('apps.payment_channels')" name="payment" :disabled="dialog.mode === 'create'">
+            <div class="app-edit-tab-panel">
+              <div class="rounded border border-slate-100 bg-slate-50 px-4 pt-4">
+                <div v-loading="appPayment.loading" class="min-h-32">
+                  <template v-if="appPayment.channels.length">
+                    <div class="mb-3 text-sm text-slate-600">{{ $t('apps.payment_channels_hint') }}</div>
+                    <el-checkbox-group v-model="appPayment.selectedChannelIds" class="grid grid-cols-2 gap-3">
+                      <el-checkbox
+                        v-for="channel in appPayment.channels"
+                        :key="channel.id"
+                        :value="channel.id"
+                        :disabled="channel.status !== 1 && !appPayment.selectedChannelIds.includes(channel.id)"
+                        class="min-w-0"
+                      >
+                        <span class="truncate">{{ channel.name }}</span>
+                        <span class="ml-1 text-xs text-slate-400">({{ channel.pay_type }})</span>
+                        <el-tag v-if="channel.status !== 1" size="small" type="info" class="ml-1">
+                          {{ $t('apps.payment_channel_disabled') }}
+                        </el-tag>
+                      </el-checkbox>
+                    </el-checkbox-group>
+                    <div class="mt-3 text-xs leading-5 text-slate-500">
+                      {{ $t('apps.payment_channels_fallback_hint') }}
+                    </div>
+                  </template>
+                  <el-empty v-else :description="$t('apps.no_payment_channels')" :image-size="72" />
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
           <el-tab-pane :label="$t('apps.manifest_extra')" name="extra">
             <div class="app-edit-tab-panel">
               <div class="rounded border border-slate-200 bg-white">
@@ -452,9 +483,22 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { createApp, deleteApp, fetchApps, updateApp } from '@/apis/apps'
+import {
+  createApp,
+  deleteApp,
+  fetchAppPaymentChannels,
+  fetchApps,
+  updateApp,
+  updateAppPaymentChannels,
+} from '@/apis/apps'
 import { fetchStorageChannels, fetchVersionManifest, fetchVersionSyncLogs, syncAppVersion } from '@/apis/storage'
-import type { AddAppReq, AppManifestUrl, AppModel, UpdateAppReq } from '@/types/apps'
+import type {
+  AddAppReq,
+  AppManifestUrl,
+  AppModel,
+  AppPaymentChannel,
+  UpdateAppReq,
+} from '@/types/apps'
 import { RegCodeType } from '@/types/reg_codes'
 import { RoutePath } from '@/types/route'
 import {
@@ -473,7 +517,7 @@ type ManifestExtraRow = {
   value: string
   type: ManifestExtraType
 }
-type AppDialogTab = 'basic' | 'version' | 'extra'
+type AppDialogTab = 'basic' | 'version' | 'payment' | 'extra'
 
 const apps = ref<AppModel[]>([])
 const page = ref(1)
@@ -511,6 +555,13 @@ const formRef = ref<FormInstance>()
 const manifestExtraRows = ref<ManifestExtraRow[]>([])
 let manifestExtraRowId = 0
 
+const appPayment = reactive({
+  loading: false,
+  loaded: false,
+  channels: [] as AppPaymentChannel[],
+  selectedChannelIds: [] as number[],
+})
+
 const rules = reactive<FormRules<AddAppReq>>({
   name: [{ required: true, message: t('apps.input_name'), trigger: 'blur' }],
   app_id: [{ required: true, message: t('apps.input_app_id'), trigger: 'blur' }],
@@ -529,6 +580,7 @@ const appDialogFieldTabs: Record<string, AppDialogTab> = {
   max_devices: 'basic',
   app_vername: 'version',
   app_vercode: 'version',
+  payment_channels: 'payment',
 }
 
 const enabledChannels = ref<StorageChannel[]>([])
@@ -689,6 +741,9 @@ function buildManifestExtra() {
 const openCreate = () => {
   Object.assign(form, emptyForm)
   resetManifestExtraRows()
+  appPayment.loaded = false
+  appPayment.channels = []
+  appPayment.selectedChannelIds = []
   onCodeTypeChange()
   dialog.mode = 'create'
   dialog.editingId = undefined
@@ -697,9 +752,12 @@ const openCreate = () => {
   formRef.value?.clearValidate()
 }
 
-const openEdit = (row: AppModel) => {
+const openEdit = async (row: AppModel) => {
   dialog.mode = 'edit'
   dialog.editingId = row.id
+  appPayment.loaded = false
+  appPayment.channels = []
+  appPayment.selectedChannelIds = []
   Object.assign(form, {
     name: row.name,
     app_id: row.app_id,
@@ -722,6 +780,7 @@ const openEdit = (row: AppModel) => {
   appDialogTab.value = 'basic'
   dialog.visible = true
   formRef.value?.clearValidate()
+  await loadAppPaymentChannels(row.id)
 }
 
 const openBuyPage = (row: AppModel) => {
@@ -761,10 +820,30 @@ const submitForm = async (currentFormRef: FormInstance | undefined) => {
     await createApp(payload)
   } else if (dialog.editingId != null) {
     await updateApp(dialog.editingId, payload as UpdateAppReq)
+    if (appPayment.loaded) {
+      await updateAppPaymentChannels(dialog.editingId, {
+        channel_ids: [...appPayment.selectedChannelIds],
+      })
+    }
   }
   dialog.visible = false
   await reload()
   ElMessage.success(t('common.saved') as string)
+}
+
+async function loadAppPaymentChannels(appId: number) {
+  appPayment.loading = true
+  try {
+    const info = await fetchAppPaymentChannels(appId)
+    appPayment.channels = info.channels
+    appPayment.selectedChannelIds = [...info.selected_channel_ids]
+    appPayment.loaded = true
+  } catch (_error) {
+    appPayment.loaded = false
+    ElMessage.error(t('apps.load_payment_channels_failed') as string)
+  } finally {
+    appPayment.loading = false
+  }
 }
 
 function validateWebsiteUrl(_rule: unknown, value: string | null | undefined, callback: (error?: Error) => void) {

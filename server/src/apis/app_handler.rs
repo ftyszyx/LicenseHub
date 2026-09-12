@@ -3,12 +3,15 @@ use crate::core::app::*;
 use crate::core::my_error::*;
 use crate::core::response::*;
 use crate::utils::convert::from_str_optional;
-use data_model::{app_version_sync_logs, apps, storage_channels};
+use chrono::Utc;
+use data_model::{
+    app_payment_channels, app_version_sync_logs, apps, payment_channels, storage_channels,
+};
 use salvo::{oapi::extract::JsonBody, prelude::*};
 use salvo_oapi::extract::PathParam;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, Set,
+    QueryOrder, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -65,6 +68,30 @@ pub struct UpdateAppReq {
     pub max_devices: Option<i32>,
     pub sort_order: Option<i32>,
     pub status: Option<i16>,
+}
+
+#[derive(Serialize)]
+pub struct AppPaymentChannelsInfo {
+    pub app_id: i32,
+    pub configured: bool,
+    pub selected_channel_ids: Vec<i32>,
+    pub channels: Vec<AppPaymentChannelInfo>,
+}
+
+#[derive(Serialize)]
+pub struct AppPaymentChannelInfo {
+    pub id: i32,
+    pub name: String,
+    pub provider: String,
+    pub pay_type: String,
+    pub status: i16,
+    pub sort_order: i32,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct UpdateAppPaymentChannelsReq {
+    #[serde(default)]
+    pub channel_ids: Vec<i32>,
 }
 
 #[derive(Serialize)]
@@ -215,6 +242,122 @@ pub async fn update_impl(
     }
     let app = app.update(&state.db).await?;
     Ok(app)
+}
+
+#[handler]
+pub async fn get_payment_channels(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+) -> Result<ApiResponse<AppPaymentChannelsInfo>, AppError> {
+    let state = get_state(depot)?;
+    Ok(ApiResponse::success(
+        get_payment_channels_impl(state, id.into_inner()).await?,
+    ))
+}
+
+pub async fn get_payment_channels_impl(
+    state: &AppState,
+    app_id: i32,
+) -> Result<AppPaymentChannelsInfo, AppError> {
+    apps::Entity::find_by_id(app_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("apps".to_string(), Some(app_id)))?;
+
+    let selected = app_payment_channels::Entity::find()
+        .filter(app_payment_channels::Column::AppId.eq(app_id))
+        .order_by_asc(app_payment_channels::Column::Id)
+        .all(&state.db)
+        .await?;
+    let selected_channel_ids = selected
+        .iter()
+        .map(|row| row.payment_channel_id)
+        .collect::<Vec<_>>();
+    let channels = payment_channels::Entity::find()
+        .order_by_asc(payment_channels::Column::SortOrder)
+        .order_by_asc(payment_channels::Column::Id)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|channel| AppPaymentChannelInfo {
+            id: channel.id,
+            name: channel.name,
+            provider: channel.provider,
+            pay_type: channel.pay_type,
+            status: channel.status,
+            sort_order: channel.sort_order,
+        })
+        .collect();
+
+    Ok(AppPaymentChannelsInfo {
+        app_id,
+        configured: !selected_channel_ids.is_empty(),
+        selected_channel_ids,
+        channels,
+    })
+}
+
+#[handler]
+pub async fn update_payment_channels(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+    req: JsonBody<UpdateAppPaymentChannelsReq>,
+) -> Result<ApiResponse<AppPaymentChannelsInfo>, AppError> {
+    let state = get_state(depot)?;
+    let info = update_payment_channels_impl(state, id.into_inner(), req.into_inner()).await?;
+    Ok(ApiResponse::success(info))
+}
+
+pub async fn update_payment_channels_impl(
+    state: &AppState,
+    app_id: i32,
+    req: UpdateAppPaymentChannelsReq,
+) -> Result<AppPaymentChannelsInfo, AppError> {
+    apps::Entity::find_by_id(app_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("apps".to_string(), Some(app_id)))?;
+
+    let mut channel_ids = req.channel_ids;
+    channel_ids.sort_unstable();
+    channel_ids.dedup();
+    if channel_ids.iter().any(|id| *id <= 0) {
+        return Err(AppError::validation(
+            "payment channel ids must be greater than 0",
+        ));
+    }
+    if !channel_ids.is_empty() {
+        let found = payment_channels::Entity::find()
+            .filter(payment_channels::Column::Id.is_in(channel_ids.clone()))
+            .all(&state.db)
+            .await?;
+        if found.len() != channel_ids.len() {
+            return Err(AppError::validation(
+                "one or more payment channels do not exist",
+            ));
+        }
+    }
+
+    let tx = state.db.begin().await?;
+    app_payment_channels::Entity::delete_many()
+        .filter(app_payment_channels::Column::AppId.eq(app_id))
+        .exec(&tx)
+        .await?;
+    let now = Utc::now().fixed_offset();
+    for payment_channel_id in channel_ids {
+        app_payment_channels::ActiveModel {
+            app_id: Set(app_id),
+            payment_channel_id: Set(payment_channel_id),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(&tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    get_payment_channels_impl(state, app_id).await
 }
 
 fn normalize_code_type(value: Option<i16>) -> Result<i16, AppError> {

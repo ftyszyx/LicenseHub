@@ -1,3 +1,4 @@
+use crate::apis::auth::validate_password;
 use crate::apis::auth_middleware::Claims;
 use crate::apis::list_api::{ListParamsReq, PagingResponse};
 use crate::core::app::*;
@@ -30,6 +31,11 @@ pub struct UserUpdatePayload {
     pub role_ids: Option<Vec<i32>>,
     #[serde(default, deserialize_with = "deserialize_nullable_rate")]
     pub commission_rate_bps: Option<Option<i32>>,
+}
+
+#[derive(Deserialize, Debug, Validate)]
+pub struct ResetPasswordPayload {
+    pub new_password: String,
 }
 
 fn deserialize_nullable_rate<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
@@ -162,6 +168,34 @@ pub async fn update_impl(
             .collect();
         Ok(UserWithRoles { user, role_ids })
     }
+}
+
+#[handler]
+pub async fn reset_password(
+    depot: &mut Depot,
+    id: PathParam<i32>,
+    req: JsonBody<ResetPasswordPayload>,
+) -> Result<ApiResponse<()>, AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    reset_password_impl(&state, id.into_inner(), req.into_inner()).await?;
+    Ok(ApiResponse::success(()))
+}
+
+pub async fn reset_password_impl(
+    state: &AppState,
+    id: i32,
+    req: ResetPasswordPayload,
+) -> Result<(), AppError> {
+    validate_password(&req.new_password)?;
+    let user = users::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("users".to_string(), Some(id)))?;
+    let mut active = user.into_active_model();
+    active.password = Set(bcrypt::hash(req.new_password, 10)?);
+    active.updated_at = Set(Utc::now().fixed_offset());
+    active.update(&state.db).await?;
+    Ok(())
 }
 
 pub fn new_referral_code() -> String {

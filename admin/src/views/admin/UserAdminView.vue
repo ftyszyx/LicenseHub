@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { formatTime } from '@/utils'
-import { fetchUsers, createUser, updateUser, deleteUser, resetReferralCode } from '@/apis/users'
+import { fetchUsers, createUser, updateUser, deleteUser, resetReferralCode, resetPassword } from '@/apis/users'
 import { fetchRoles } from '@/apis/roles'
 import { useI18n } from 'vue-i18n'
 import type { UserWithRoles } from '@/types/user'
@@ -30,9 +30,21 @@ function onSelChange(arr: UserWithRoles[]) { selectedIds.value = arr.map(it => i
 function handlePageChange(p: number) { page.value = p; reload() }
 function handleSizeChange(s: number) { pageSize.value = s; page.value = 1; reload() }
 const dialog = reactive({ visible: false, mode: 'create' as 'create' | 'edit', editingId: undefined as number | undefined })
+const resetPasswordDialog = reactive({ visible: false, saving: false, userId: undefined as number | undefined, username: '', newPassword: '', confirmPassword: '' })
 const formRef = ref<FormInstance>()
+const resetPasswordFormRef = ref<FormInstance>()
 const form = reactive<{ username: string; password?: string; role_ids?: number[]; commission_rate_percent?: number | null }>({ username: '', password: '', role_ids: [], commission_rate_percent: null })
 const rules = reactive<FormRules>({ username: [{ required: true, message: 'Username required' }] })
+const resetPasswordRules = reactive<FormRules>({
+  newPassword: [
+    { required: true, message: t('users.password_required'), trigger: 'blur' },
+    { min: 8, max: 72, message: t('users.password_length'), trigger: 'blur' },
+  ],
+  confirmPassword: [
+    { required: true, message: t('users.password_required'), trigger: 'blur' },
+    { validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => value === resetPasswordDialog.newPassword ? callback() : callback(new Error(t('users.password_mismatch'))), trigger: 'blur' },
+  ],
+})
 function openCreate() { dialog.mode = 'create'; dialog.editingId = undefined; form.username = ''; form.password = ''; form.role_ids = []; form.commission_rate_percent = null; dialog.visible = true }
 function openEdit(row: UserWithRoles) { dialog.mode = 'edit'; dialog.editingId = row.user.id; form.username = row.user.username; form.password = ''; form.role_ids = [...(row.role_ids || [])]; form.commission_rate_percent = row.user.commission_rate_bps == null ? null : row.user.commission_rate_bps / 100; dialog.visible = true }
 
@@ -51,6 +63,25 @@ async function submit() {
 }
 async function del(id: number) { await ElMessageBox.confirm(t('common.delete_confirm', { name: rows.value.find(it => it.user.id === id)?.user.username || '' }), t('common.confirm'), { type: 'warning' }); await deleteUser(id); ElMessage.success(t('common.deleted') as string); reload() }
 async function resetCode(id: number) { await resetReferralCode(id); ElMessage.success('推广码已重置'); await reload() }
+function openResetPassword(row: UserWithRoles) {
+  resetPasswordDialog.userId = row.user.id
+  resetPasswordDialog.username = row.user.username
+  resetPasswordDialog.newPassword = ''
+  resetPasswordDialog.confirmPassword = ''
+  resetPasswordDialog.visible = true
+}
+async function submitResetPassword() {
+  const valid = await resetPasswordFormRef.value?.validate()
+  if (!valid || resetPasswordDialog.userId == null) return
+  resetPasswordDialog.saving = true
+  try {
+    await resetPassword(resetPasswordDialog.userId, resetPasswordDialog.newPassword)
+    resetPasswordDialog.visible = false
+    ElMessage.success(t('users.password_reset_success'))
+  } finally {
+    resetPasswordDialog.saving = false
+  }
+}
 onMounted(() => { reload(); reloadRoles() })
 </script>
 
@@ -95,11 +126,14 @@ onMounted(() => { reload(); reloadRoles() })
         <el-table-column :label="$t('orders.created')" min-width="180">
           <template #default="{ row }">{{ formatTime(row.user.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="360" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openEdit(row)">{{ $t('common.edit') }}</el-button>
-            <el-button size="small" @click="resetCode(row.user.id)">重置推广码</el-button>
-            <el-button size="small" type="danger" @click="del(row.user.id)">{{ $t('common.delete') }}</el-button>
+            <div class="flex flex-wrap justify-end gap-2">
+              <el-button size="small" @click="openEdit(row)">{{ $t('common.edit') }}</el-button>
+              <el-button size="small" @click="openResetPassword(row)">{{ $t('users.reset_password') }}</el-button>
+              <el-button size="small" @click="resetCode(row.user.id)">{{ $t('users.reset_referral_code') }}</el-button>
+              <el-button size="small" type="danger" @click="del(row.user.id)">{{ $t('common.delete') }}</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -131,6 +165,24 @@ onMounted(() => { reload(); reloadRoles() })
       <template #footer>
         <el-button @click="dialog.visible = false">{{ $t('common.cancel') }}</el-button>
         <el-button type="primary" @click="submit">{{ $t('common.confirm') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="resetPasswordDialog.visible" :title="$t('users.reset_password')" width="min(440px, calc(100vw - 32px))" destroy-on-close>
+      <el-form ref="resetPasswordFormRef" :model="resetPasswordDialog" :rules="resetPasswordRules" label-width="120px">
+        <el-form-item :label="$t('auth.username')">
+          <span>{{ resetPasswordDialog.username }}</span>
+        </el-form-item>
+        <el-form-item :label="$t('auth.new_password')" prop="newPassword">
+          <el-input v-model="resetPasswordDialog.newPassword" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item :label="$t('auth.confirm_password')" prop="confirmPassword">
+          <el-input v-model="resetPasswordDialog.confirmPassword" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetPasswordDialog.visible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="resetPasswordDialog.saving" @click="submitResetPassword">{{ $t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
   </div>

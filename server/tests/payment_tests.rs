@@ -115,6 +115,7 @@ async fn create_delivered_referral_order(
             pay_type: "wechat_native".to_string(),
             out_trade_no: order_no.clone(),
             provider_trade_no: Some(helpers::unique_name("WX-SETTLEMENT")),
+            provider_buyer_id: None,
             amount_cents: price_cents,
             status: PaymentStatus::Success,
             raw_payload: json!({"source": "settlement-test"}),
@@ -196,6 +197,7 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
         pay_type: "wechat_native".to_string(),
         out_trade_no: order_no.clone(),
         provider_trade_no: Some(helpers::unique_name("WX")),
+        provider_buyer_id: Some("openid-payment-test".to_string()),
         amount_cents: 123,
         status: PaymentStatus::Success,
         raw_payload: json!({"source": "unit-test"}),
@@ -224,6 +226,15 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
         json["data"]["buyer_email"].as_str(),
         Some("payment-test@example.com")
     );
+    assert!(json["data"].get("provider_buyer_id").is_none());
+    let pool = sqlx::PgPool::connect(&ctx.get_db_url()).await.unwrap();
+    let provider_buyer_id: Option<String> =
+        sqlx::query_scalar("select provider_buyer_id from orders where order_no = $1")
+            .bind(&order_no)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(provider_buyer_id.as_deref(), Some("openid-payment-test"));
     assert!(json["data"]["paid_at"].as_str().is_some());
     let reg_code = json["data"]["reg_code"].as_str().unwrap().to_string();
     assert!(reg_code.starts_with("LH-"));
@@ -258,6 +269,7 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
         );
         assert_eq!(matched["amount_cents"].as_i64(), Some(123));
         assert!(matched["paid_at"].as_str().is_some());
+        assert!(matched.get("provider_buyer_id").is_none());
         if lookup_type == "buyer_email" {
             assert!(matched.get("reg_code").is_none());
         } else {
@@ -281,9 +293,21 @@ async fn test_create_order_and_payment_notification_delivers_reg_code() {
     let json = helpers::print_response_body_get_json(resp, "public_order_lookup_empty_email").await;
     assert!(!json["success"].as_bool().unwrap());
 
+    sqlx::query("update orders set provider_buyer_id = null where order_no = $1")
+        .bind(&order_no)
+        .execute(&pool)
+        .await
+        .unwrap();
     process_payment_notification(&ctx.app_state, notification)
         .await
         .unwrap();
+    let provider_buyer_id: Option<String> =
+        sqlx::query_scalar("select provider_buyer_id from orders where order_no = $1")
+            .bind(&order_no)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(provider_buyer_id.as_deref(), Some("openid-payment-test"));
 
     let resp = TestClient::get(helpers::get_url(
         "/api/admin/orders/list?page=1&page_size=10",
@@ -384,6 +408,7 @@ async fn test_confirm_order_refund_revokes_entitlement_and_cancels_commission() 
         pay_type: "wechat_native".to_string(),
         out_trade_no: order_no.clone(),
         provider_trade_no: Some(helpers::unique_name("WX-REFUND")),
+        provider_buyer_id: None,
         amount_cents: 5000,
         status: PaymentStatus::Success,
         raw_payload: json!({"source": "refund-test"}),

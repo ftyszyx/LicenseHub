@@ -87,6 +87,7 @@ async fn test_dashboard_stats_use_real_data() {
             pay_type: "wechat_native".to_string(),
             out_trade_no: first_order_no.clone(),
             provider_trade_no: Some(helpers::unique_name("WX")),
+            provider_buyer_id: Some("dashboard-buyer".to_string()),
             amount_cents: 2599,
             status: PaymentStatus::Success,
             raw_payload: json!({"source": "dashboard-test"}),
@@ -99,8 +100,9 @@ async fn test_dashboard_stats_use_real_data() {
         PaymentNotification {
             provider: "wechat".to_string(),
             pay_type: "wechat_native".to_string(),
-            out_trade_no: second_order_no,
+            out_trade_no: second_order_no.clone(),
             provider_trade_no: Some(helpers::unique_name("WX")),
+            provider_buyer_id: Some("dashboard-buyer".to_string()),
             amount_cents: 2599,
             status: PaymentStatus::Success,
             raw_payload: json!({"source": "dashboard-test-second-plan"}),
@@ -159,6 +161,9 @@ async fn test_dashboard_stats_use_real_data() {
     let today = daily_points.last().unwrap();
     assert_eq!(today["revenue_cents"].as_i64(), Some(5198));
     assert_eq!(today["order_count"].as_u64(), Some(2));
+    assert_eq!(today["new_buyer_order_count"].as_u64(), Some(1));
+    assert_eq!(today["returning_buyer_order_count"].as_u64(), Some(1));
+    assert_eq!(today["unidentified_buyer_order_count"].as_u64(), Some(0));
 
     let monthly_trend = fetch_dashboard_trend(&ctx, "month", Some(app_id)).await;
     let monthly_points = monthly_trend["points"].as_array().unwrap();
@@ -166,6 +171,11 @@ async fn test_dashboard_stats_use_real_data() {
     let current_month = monthly_points.last().unwrap();
     assert_eq!(current_month["revenue_cents"].as_i64(), Some(5198));
     assert_eq!(current_month["order_count"].as_u64(), Some(2));
+    assert_eq!(current_month["new_buyer_order_count"].as_u64(), Some(1));
+    assert_eq!(
+        current_month["returning_buyer_order_count"].as_u64(),
+        Some(1)
+    );
 
     let yearly_trend = fetch_dashboard_trend(&ctx, "year", Some(app_id)).await;
     let yearly_points = yearly_trend["points"].as_array().unwrap();
@@ -173,6 +183,38 @@ async fn test_dashboard_stats_use_real_data() {
     let current_year = yearly_points.last().unwrap();
     assert_eq!(current_year["revenue_cents"].as_i64(), Some(5198));
     assert_eq!(current_year["order_count"].as_u64(), Some(2));
+    assert_eq!(current_year["new_buyer_order_count"].as_u64(), Some(1));
+    assert_eq!(
+        current_year["returning_buyer_order_count"].as_u64(),
+        Some(1)
+    );
+
+    let today_period = chrono::Utc::now()
+        .with_timezone(&chrono::FixedOffset::east_opt(8 * 60 * 60).unwrap())
+        .format("%Y-%m-%d")
+        .to_string();
+    let returning_orders =
+        fetch_dashboard_returning_orders(&ctx, "day", &today_period, Some(app_id)).await;
+    assert_eq!(returning_orders["total"].as_u64(), Some(1));
+    let returning_order = &returning_orders["list"][0];
+    assert_eq!(
+        returning_order["order_no"].as_str(),
+        Some(second_order_no.as_str())
+    );
+    assert_eq!(
+        returning_order["first_order_no"].as_str(),
+        Some(first_order_no.as_str())
+    );
+    assert_eq!(returning_order["purchase_number"].as_u64(), Some(2));
+    assert_eq!(
+        returning_order["provider_buyer_id"].as_str(),
+        Some("dashboard-buyer")
+    );
+    assert_eq!(
+        returning_order["buyer_email"].as_str(),
+        Some("dashboard-test@example.com")
+    );
+    assert!(returning_order["buyer_user_id"].is_null());
 }
 
 async fn fetch_dashboard(ctx: &helpers::TestContext) -> serde_json::Value {
@@ -201,6 +243,29 @@ async fn fetch_dashboard_trend(
         .await;
     assert_eq!(resp.status_code, Some(StatusCode::OK));
     let json = helpers::print_response_body_get_json(resp, "dashboard_trend").await;
+    assert!(json["success"].as_bool().unwrap());
+    json["data"].clone()
+}
+
+async fn fetch_dashboard_returning_orders(
+    ctx: &helpers::TestContext,
+    group_by: &str,
+    period: &str,
+    app_id: Option<i32>,
+) -> serde_json::Value {
+    let encoded_period = period.replace(' ', "%20");
+    let mut url = format!(
+        "/api/admin/dashboard/returning-orders?group_by={group_by}&period={encoded_period}"
+    );
+    if let Some(app_id) = app_id {
+        url.push_str(&format!("&app_id={app_id}"));
+    }
+    let resp = TestClient::get(helpers::get_url(&url))
+        .add_header("authorization", helpers::bearer(&ctx.token), true)
+        .send(&ctx.app)
+        .await;
+    assert_eq!(resp.status_code, Some(StatusCode::OK));
+    let json = helpers::print_response_body_get_json(resp, "dashboard_returning_orders").await;
     assert!(json["success"].as_bool().unwrap());
     json["data"].clone()
 }
